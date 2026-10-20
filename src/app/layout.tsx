@@ -16,9 +16,9 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: `${CLUB_CONFIG.clubNamePlaceholder} - Padel Court Booking & Management`,
+  title: `${CLUB_CONFIG.businessName} - Karachi's Premier Padel Experience (PECHS)`,
   description:
-    'Reserve professional panoramic and indoor padel courts in Pakistan with instant slot holds, easy advance payment via Bank Transfer, Easypaisa, or JazzCash, and verified booking confirmation.',
+    'Reserve professional panoramic padel courts in PECHS, Karachi at Power Padel Arena. Instant slot holds, seamless advance payment via Bank Transfer, Easypaisa, or JazzCash, and fast booking verification.',
 };
 
 export default function RootLayout({
@@ -31,7 +31,7 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-slate-50 text-slate-900 selection:bg-emerald-500 selection:text-slate-950">
+      <body className="min-h-full flex flex-col bg-white text-[#0A2540] selection:bg-orange-500 selection:text-white">
         <Header />
         <main className="flex-1 flex flex-col">{children}</main>
         <Footer />

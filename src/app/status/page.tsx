@@ -20,7 +20,6 @@ import {
   ArrowRight,
   Clock,
   MessageCircle,
-  ExternalLink,
   Info,
 } from 'lucide-react';
 
@@ -153,18 +152,18 @@ function StatusAndPaymentContent() {
       <DemoBanner message="DEMO PAYMENT & VERIFICATION: Real screenshot uploads will be stored in Supabase private storage in Phase 6. No actual money is transferred." />
 
       {/* Header & Search Bar */}
-      <div className="bg-slate-900 text-white py-10 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
+      <div className="bg-[#0A2540] text-white py-10 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
         <div className="max-w-5xl mx-auto">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
             <div>
-              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                Self-Service Portal
+              <span className="text-xs font-bold text-orange-400 uppercase tracking-wider">
+                Power Padel Arena • Player Verification
               </span>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mt-1">
                 Booking & Payment Status
               </h1>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1">
-                Track your court reservation, view payment accounts, and upload transaction proof.
+              <p className="text-xs sm:text-sm text-slate-200 mt-1">
+                Track your court reservation, view official payment accounts, and upload transaction proof.
               </p>
             </div>
 
@@ -177,12 +176,12 @@ function StatusAndPaymentContent() {
                   placeholder="Enter Ref (e.g. PADEL-PK-2026-8921)"
                   value={searchInput}
                   onChange={(e) => setSearchInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-xl bg-slate-800 border border-slate-700 text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
               <button
                 type="submit"
-                className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shrink-0 transition-colors"
+                className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shrink-0 transition-colors shadow"
               >
                 Find
               </button>
@@ -202,7 +201,7 @@ function StatusAndPaymentContent() {
                 }}
                 className={`px-2.5 py-1 rounded-lg border text-[11px] font-mono transition-all ${
                   activeBooking?.referenceNumber === b.referenceNumber
-                    ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                    ? 'bg-orange-500/20 text-orange-300 border-orange-500/40'
                     : 'bg-slate-800/80 text-slate-300 border-slate-700 hover:border-slate-600'
                 }`}
               >
@@ -562,7 +561,7 @@ function StatusAndPaymentContent() {
                     <button
                       type="submit"
                       disabled={isSubmitting}
-                      className="w-full py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-300 text-slate-950 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                      className="w-full py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:bg-slate-300 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
                     >
                       {isSubmitting ? (
                         <span>Submitting for Review...</span>
@@ -591,18 +590,11 @@ function StatusAndPaymentContent() {
                   href={`https://wa.me/${CLUB_CONFIG.whatsappNumberPlaceholder}?text=Assalam-o-Alaikum%2C%20regarding%20booking%20reference%20${activeBooking.referenceNumber}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold hover:bg-emerald-100 transition-colors"
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold hover:bg-emerald-100 transition-colors"
                 >
                   <MessageCircle className="w-3.5 h-3.5" />
-                  <span>WhatsApp Club Desk</span>
+                  <span>WhatsApp Power Padel Desk</span>
                 </a>
-                <Link
-                  href="/admin"
-                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-slate-900 text-white font-semibold hover:bg-slate-800 transition-colors"
-                >
-                  <span>Open Admin Demo View</span>
-                  <ExternalLink className="w-3 h-3" />
-                </Link>
               </div>
             </div>
 

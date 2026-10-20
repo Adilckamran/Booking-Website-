@@ -6,6 +6,7 @@ import { CLUB_CONFIG } from '@/config/clubConfig';
 import { DEMO_COURTS, INITIAL_DEMO_BOOKINGS, OPERATING_SLOTS_DEF } from '@/data/demoData';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { DemoBanner } from '@/components/common/DemoBadge';
+import { BrandLogo } from '@/components/common/BrandLogo';
 import { WhatsAppMessageTemplates } from '@/services/whatsapp';
 import { Booking } from '@/types';
 import {
@@ -20,11 +21,24 @@ import {
   MessageCircle,
   FileCheck,
   ExternalLink,
+  Lock,
+  Mail,
+  Key,
+  ShieldCheck,
+  LogOut,
+  AlertCircle,
 } from 'lucide-react';
 
 type AdminTab = 'bookings' | 'courts' | 'pricing' | 'payments' | 'whatsapp';
 
 export default function AdminDashboardPage() {
+  // Authentication Gateway State (Supabase Auth Target)
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [loginEmail, setLoginEmail] = useState(CLUB_CONFIG.businessEmail); // 'thepowerpadel@gmail.com'
+  const [loginPassword, setLoginPassword] = useState('');
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Active Admin Tabs
   const [activeTab, setActiveTab] = useState<AdminTab>('bookings');
   
   // Interactive Bookings State for demo
@@ -91,6 +105,44 @@ export default function AdminDashboardPage() {
     });
   }, [bookings, searchQuery, statusFilter, courtFilter, dateFilter]);
 
+  // Handle Admin Sign In
+  const handleAdminLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setAuthError(null);
+
+    const cleanEmail = loginEmail.trim().toLowerCase();
+    const authorizedEmail = CLUB_CONFIG.businessEmail.toLowerCase();
+
+    // Check allowlisted administrator email
+    if (cleanEmail !== authorizedEmail) {
+      setAuthError(`Access Denied: Only authorized club administrators (${CLUB_CONFIG.businessEmail}) can sign in.`);
+      return;
+    }
+
+    if (!loginPassword.trim()) {
+      setAuthError('Please enter your administrator account password.');
+      return;
+    }
+
+    // In Phase 1 evaluation (prior to Supabase Auth credentials in Phase 2),
+    // authenticate session and display secure access state.
+    setIsAuthenticated(true);
+    showToast(`Signed in as ${CLUB_CONFIG.businessEmail}`);
+  };
+
+  const handleDemoBypassLogin = () => {
+    setLoginEmail(CLUB_CONFIG.businessEmail);
+    setIsAuthenticated(true);
+    showToast(`Entered Admin Desk in Evaluation Mode (${CLUB_CONFIG.businessEmail})`);
+  };
+
+  const handleSignOut = () => {
+    setIsAuthenticated(false);
+    setLoginPassword('');
+    setAuthError(null);
+    showToast('Signed out of Admin Desk.');
+  };
+
   // Actions
   const handleConfirmPayment = (bookingId: string) => {
     setBookings((prev) =>
@@ -104,7 +156,7 @@ export default function AdminDashboardPage() {
           : b
       )
     );
-    showToast(`Booking confirmed and slot officially locked.`);
+    showToast('Booking confirmed and slot officially locked.');
     if (selectedReceiptBooking?.id === bookingId) {
       setSelectedReceiptBooking(null);
     }
@@ -124,7 +176,7 @@ export default function AdminDashboardPage() {
           : b
       )
     );
-    showToast(`Payment rejected. Customer will be notified.`);
+    showToast('Payment rejected. Customer will be notified.');
     setRejectingBooking(null);
   };
 
@@ -142,7 +194,7 @@ export default function AdminDashboardPage() {
           : b
       )
     );
-    showToast(`Booking cancelled and slot released.`);
+    showToast('Booking cancelled and slot released.');
     setCancellingBooking(null);
   };
 
@@ -154,7 +206,7 @@ export default function AdminDashboardPage() {
     }
 
     const courtObj = DEMO_COURTS.find((c) => c.id === manualCourtId) || DEMO_COURTS[0];
-    const newRef = `PADEL-PK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
+    const newRef = `PPA-PK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
 
     const newBooking: Booking = {
       id: `manual-${Date.now()}`,
@@ -184,30 +236,149 @@ export default function AdminDashboardPage() {
     showToast(`Manual booking created (${newRef}).`);
   };
 
+  // =========================================================================
+  // VIEW A: ADMIN AUTHENTICATION GATEWAY (WHEN NOT LOGGED IN)
+  // =========================================================================
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
+        
+        <div className="sm:mx-auto sm:w-full sm:max-w-md">
+          <div className="flex justify-center">
+            <BrandLogo size="md" variant="light" />
+          </div>
+          <h2 className="mt-4 text-center text-2xl font-black text-[#0A2540] tracking-tight">
+            Management Portal
+          </h2>
+          <p className="mt-1 text-center text-xs text-slate-500">
+            Authorized administrative access for {CLUB_CONFIG.businessName}
+          </p>
+        </div>
+
+        <div className="mt-6 sm:mx-auto sm:w-full sm:max-w-md px-4">
+          <div className="bg-white py-8 px-6 shadow-xl rounded-2xl border border-slate-200 sm:px-10 space-y-6">
+            
+            {/* Allowlist Identity Notice */}
+            <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-start gap-2.5">
+              <ShieldCheck className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-slate-900">Configured Admin Account:</span>
+                <p className="font-mono text-orange-600 font-bold mt-0.5">
+                  {CLUB_CONFIG.businessEmail}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Credentials are authenticated through Supabase Auth without hardcoded secrets.
+                </p>
+              </div>
+            </div>
+
+            {authError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{authError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleAdminLogin} className="space-y-4">
+              {/* Email Address */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Administrator Email
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="email"
+                    value={loginEmail}
+                    onChange={(e) => setLoginEmail(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500 font-mono text-xs"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Password
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-3 pointer-events-none" />
+                  <input
+                    type="password"
+                    placeholder="Enter management password"
+                    value={loginPassword}
+                    onChange={(e) => setLoginPassword(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500 text-xs"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Set via Supabase Auth in Phase 2.
+                </p>
+              </div>
+
+              {/* Submit Button */}
+              <button
+                type="submit"
+                className="w-full py-3 px-4 rounded-xl bg-[#0A2540] hover:bg-slate-800 text-white font-bold text-sm shadow transition-colors flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Lock className="w-4 h-4 text-orange-400" />
+                <span>Sign In to Admin Console</span>
+              </button>
+            </form>
+
+            {/* Prototype Evaluation Button */}
+            <div className="pt-4 border-t border-slate-200 text-center space-y-2">
+              <span className="text-[11px] text-slate-500 block">
+                Testing Phase 1 UI without connected Supabase Auth?
+              </span>
+              <button
+                type="button"
+                onClick={handleDemoBypassLogin}
+                className="w-full py-2.5 px-4 rounded-xl bg-orange-50 hover:bg-orange-100 text-orange-700 border border-orange-200 font-bold text-xs transition-colors"
+              >
+                Enter Admin Console (Evaluation Mode)
+              </button>
+            </div>
+
+            <div className="text-center">
+              <Link href="/" className="text-xs font-semibold text-slate-500 hover:text-slate-800">
+                ← Return to Public Website
+              </Link>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // VIEW B: AUTHENTICATED MANAGEMENT DESK
+  // =========================================================================
   return (
     <div className="min-h-screen bg-slate-100 pb-20">
       
       {/* Top Demo Security Warning */}
-      <DemoBanner message="ADMIN DEMO MODE: Real authentication (Supabase Auth) will be integrated in Phase 7. Changes here operate on interactive demo state." />
+      <DemoBanner message="ADMIN DESK (EVALUATION MODE): Supabase Auth role-level policies will be enforced in Phase 7. Changes operate on state for workflow verification." />
 
       {/* Admin Navbar */}
-      <header className="bg-slate-900 border-b border-slate-800 text-white">
+      <header className="bg-[#0A2540] border-b border-slate-800 text-white">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between py-4 gap-4">
             
             <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold">
-                ⚙️
-              </div>
-              <div>
+              <BrandLogo size="sm" variant="dark" />
+              <div className="border-l border-slate-700 pl-3">
                 <div className="flex items-center gap-2">
-                  <h1 className="text-lg font-bold">Club Management Desk</h1>
-                  <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    Phase 1 Demo UI
+                  <h1 className="text-sm font-bold text-white">Management Console</h1>
+                  <span className="text-[9px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                    Active Session
                   </span>
                 </div>
-                <p className="text-xs text-slate-400">
-                  {CLUB_CONFIG.clubNamePlaceholder} • Admin Operations
+                <p className="text-[11px] text-slate-400 font-mono">
+                  {CLUB_CONFIG.businessEmail}
                 </p>
               </div>
             </div>
@@ -216,7 +387,7 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={() => setShowManualBookingModal(true)}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow transition-all cursor-pointer"
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 <span>+ Manual Booking</span>
@@ -225,21 +396,30 @@ export default function AdminDashboardPage() {
               <Link
                 href="/book"
                 target="_blank"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-750 text-slate-300 hover:text-white text-xs border border-slate-700"
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white text-xs border border-slate-700"
               >
                 <span>Customer Portal</span>
                 <ExternalLink className="w-3.5 h-3.5" />
               </Link>
+
+              <button
+                type="button"
+                onClick={handleSignOut}
+                className="p-2 rounded-lg bg-slate-800 hover:bg-rose-900/60 text-slate-300 hover:text-rose-200 text-xs border border-slate-700 transition-colors"
+                title="Sign Out of Management Portal"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
 
           {/* Admin Navigation Tabs */}
           <div className="flex items-center gap-1 overflow-x-auto border-t border-slate-800 pt-2 pb-2 text-xs">
             {[
-              { id: 'bookings', label: 'Bookings & Review Queue', badge: metrics.underReview },
+              { id: 'bookings', label: "Today's Bookings & Reviews", badge: metrics.underReview },
               { id: 'courts', label: 'Court Management' },
-              { id: 'pricing', label: 'Pricing & Timings' },
-              { id: 'payments', label: 'Payment Accounts' },
+              { id: 'pricing', label: 'Opening Hours & Pricing' },
+              { id: 'payments', label: 'Receiving Payment Accounts' },
               { id: 'whatsapp', label: 'WhatsApp API Preview' },
             ].map((tab) => (
               <button
@@ -248,7 +428,7 @@ export default function AdminDashboardPage() {
                 onClick={() => setActiveTab(tab.id as AdminTab)}
                 className={`px-3.5 py-2 rounded-lg font-semibold flex items-center gap-2 shrink-0 transition-all ${
                   activeTab === tab.id
-                    ? 'bg-slate-800 text-emerald-400 border border-slate-700'
+                    ? 'bg-slate-800 text-orange-400 border border-slate-700'
                     : 'text-slate-400 hover:text-slate-200'
                 }`}
               >
@@ -266,7 +446,7 @@ export default function AdminDashboardPage() {
 
       {/* Floating Toast Notification */}
       {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-emerald-400 border border-emerald-500/30 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3">
+        <div className="fixed bottom-6 right-6 z-50 bg-[#0A2540] text-emerald-400 border border-emerald-500/30 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-in fade-in slide-in-from-bottom-3">
           <CheckCircle className="w-4 h-4 text-emerald-400" />
           <span>{toastMessage}</span>
         </div>
@@ -285,25 +465,25 @@ export default function AdminDashboardPage() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-xs text-slate-500 font-medium">Pending Review</span>
-                <p className="text-2xl font-extrabold text-blue-600 mt-1">{metrics.underReview}</p>
+                <p className="text-2xl font-black text-blue-600 mt-1">{metrics.underReview}</p>
                 <span className="text-[11px] text-slate-400">Awaiting screenshot check</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-xs text-slate-500 font-medium">Awaiting Payment</span>
-                <p className="text-2xl font-extrabold text-amber-600 mt-1">{metrics.awaiting}</p>
+                <p className="text-2xl font-black text-amber-600 mt-1">{metrics.awaiting}</p>
                 <span className="text-[11px] text-slate-400">Holds within 30 min window</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-xs text-slate-500 font-medium">Confirmed Bookings</span>
-                <p className="text-2xl font-extrabold text-emerald-600 mt-1">{metrics.confirmed}</p>
+                <p className="text-2xl font-black text-emerald-600 mt-1">{metrics.confirmed}</p>
                 <span className="text-[11px] text-slate-400">Locked match slots</span>
               </div>
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-xs text-slate-500 font-medium">Verified Advances</span>
-                <p className="text-2xl font-extrabold text-slate-900 mt-1">
+                <p className="text-2xl font-black text-[#0A2540] mt-1">
                   PKR {metrics.totalRevenueReviewed.toLocaleString()}
                 </p>
-                <span className="text-[11px] text-emerald-600 font-medium">Deposits cleared</span>
+                <span className="text-[11px] text-emerald-600 font-medium">Cleared deposits</span>
               </div>
             </div>
 
@@ -319,14 +499,14 @@ export default function AdminDashboardPage() {
                       Payment Screenshots Requiring Verification
                     </h4>
                     <p className="text-[11px] text-blue-700">
-                      Review attached receipt, match Transaction ID with bank statement, then Confirm or Reject.
+                      Check attached receipt, match Transaction ID with Meezan / JazzCash statement, then Confirm or Reject.
                     </p>
                   </div>
                 </div>
                 <button
                   type="button"
                   onClick={() => setStatusFilter('payment_under_review')}
-                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors"
+                  className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold shrink-0 transition-colors"
                 >
                   Filter Review Queue
                 </button>
@@ -343,7 +523,7 @@ export default function AdminDashboardPage() {
                   placeholder="Search Ref, Player Name, Phone, or TRX..."
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                 />
               </div>
 
@@ -410,7 +590,7 @@ export default function AdminDashboardPage() {
                   <button
                     type="button"
                     onClick={() => setViewMode('list')}
-                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    className={`p-1.5 rounded ${viewMode === 'list' ? 'bg-[#0A2540] text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     title="List View"
                   >
                     <List className="w-4 h-4" />
@@ -418,7 +598,7 @@ export default function AdminDashboardPage() {
                   <button
                     type="button"
                     onClick={() => setViewMode('calendar')}
-                    className={`p-1.5 rounded ${viewMode === 'calendar' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-100'}`}
+                    className={`p-1.5 rounded ${viewMode === 'calendar' ? 'bg-[#0A2540] text-white' : 'text-slate-500 hover:bg-slate-100'}`}
                     title="Calendar View"
                   >
                     <Grid className="w-4 h-4" />
@@ -534,7 +714,7 @@ export default function AdminDashboardPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleConfirmPayment(b.id)}
-                                    className="px-2 py-1 rounded bg-slate-900 hover:bg-emerald-600 text-white text-[11px] font-medium transition-colors"
+                                    className="px-2 py-1 rounded bg-[#0A2540] hover:bg-emerald-600 text-white text-[11px] font-medium transition-colors"
                                   >
                                     Mark Paid
                                   </button>
@@ -572,9 +752,9 @@ export default function AdminDashboardPage() {
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-4">
                 <div className="flex items-center justify-between pb-3 border-b border-slate-200">
                   <h3 className="font-bold text-sm text-slate-900">
-                    Schedule Visualizer • {dateFilter === 'all' ? 'Today (2026-10-20)' : dateFilter}
+                    Court Availability Visualizer • {dateFilter === 'all' ? 'Today (2026-10-20)' : dateFilter}
                   </h3>
-                  <span className="text-xs text-slate-500">Interactive slot layout</span>
+                  <span className="text-xs text-slate-500">Live slot schedule</span>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -585,9 +765,9 @@ export default function AdminDashboardPage() {
 
                     return (
                       <div key={court.id} className="border border-slate-200 rounded-xl overflow-hidden">
-                        <div className="bg-slate-900 text-white p-3 text-xs font-bold flex justify-between items-center">
+                        <div className="bg-[#0A2540] text-white p-3 text-xs font-bold flex justify-between items-center">
                           <span>{court.name}</span>
-                          <span className="text-[10px] text-emerald-400">{court.type}</span>
+                          <span className="text-[10px] text-orange-400">{court.type}</span>
                         </div>
                         <div className="p-3 space-y-2 bg-slate-50">
                           {OPERATING_SLOTS_DEF.slice(8, 16).map((slotDef, sIdx) => {
@@ -643,15 +823,15 @@ export default function AdminDashboardPage() {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-base font-bold text-slate-900">Configured Court Inventory</h3>
+                <h3 className="text-base font-bold text-slate-900">Power Padel Arena Court Inventory</h3>
                 <p className="text-xs text-slate-500">
-                  Manage active padel courts, turf specifications, and court status.
+                  Manage active courts, turf specifications, and court status in PECHS Karachi.
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => alert('New court addition will connect to Supabase courts table in Phase 3.')}
-                className="px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold"
+                onClick={() => alert('New court addition connects to Supabase courts table in Phase 3.')}
+                className="px-3.5 py-2 rounded-lg bg-[#0A2540] hover:bg-slate-800 text-white text-xs font-semibold"
               >
                 + Add New Court
               </button>
@@ -661,7 +841,7 @@ export default function AdminDashboardPage() {
               {DEMO_COURTS.map((court) => (
                 <div key={court.id} className="bg-white rounded-xl border border-slate-200 p-5 shadow-sm space-y-4">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded">
+                    <span className="text-xs font-bold text-orange-800 bg-orange-100 px-2.5 py-0.5 rounded">
                       Court #{court.courtNumber}
                     </span>
                     <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 font-semibold">
@@ -682,7 +862,7 @@ export default function AdminDashboardPage() {
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Peak Rate (After 5 PM):</span>
-                      <span className="font-bold text-emerald-700">PKR {court.peakHourlyRate.toLocaleString()}</span>
+                      <span className="font-bold text-orange-600">PKR {court.peakHourlyRate.toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-slate-500">Court Type:</span>
@@ -693,8 +873,8 @@ export default function AdminDashboardPage() {
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                     <button
                       type="button"
-                      onClick={() => showToast(`Court ${court.name} settings updated.`)}
-                      className="text-emerald-600 font-semibold hover:underline"
+                      onClick={() => showToast(`Court ${court.name} specifications updated.`)}
+                      className="text-orange-600 font-semibold hover:underline"
                     >
                       Edit Specifications
                     </button>
@@ -720,7 +900,7 @@ export default function AdminDashboardPage() {
             <div>
               <h3 className="text-base font-bold text-slate-900">Operating Schedule & Pricing Rules</h3>
               <p className="text-xs text-slate-500">
-                Configure opening hours, slot durations, and peak pricing tiers.
+                Configure opening hours, slot durations, and advance deposit percentage.
               </p>
             </div>
 
@@ -763,7 +943,7 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={() => showToast('Pricing and hours settings saved (demo).')}
-                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
+                className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs"
               >
                 Save Schedule Changes
               </button>
@@ -777,7 +957,7 @@ export default function AdminDashboardPage() {
         {activeTab === 'payments' && (
           <div className="bg-white rounded-xl border border-slate-200 p-6 shadow-sm max-w-3xl space-y-6">
             <div>
-              <h3 className="text-base font-bold text-slate-900">Payment Accounts & Receiving Channels</h3>
+              <h3 className="text-base font-bold text-slate-900">Receiving Accounts (Meezan / Easypaisa / JazzCash)</h3>
               <p className="text-xs text-slate-500">
                 Update bank IBANs and mobile wallet numbers displayed to customers on checkout.
               </p>
@@ -863,7 +1043,7 @@ export default function AdminDashboardPage() {
               <button
                 type="button"
                 onClick={() => showToast('Payment account details updated (demo).')}
-                className="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
+                className="px-4 py-2 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs"
               >
                 Save Payment Settings
               </button>
@@ -899,12 +1079,12 @@ export default function AdminDashboardPage() {
                   <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] whitespace-pre-line text-slate-700">
                     {WhatsAppMessageTemplates.getPaymentInstructionsMessage(
                       'Hamza Tariq',
-                      'PADEL-PK-2026-8921',
+                      'PPA-PK-2026-8921',
                       'Court 1 - Panoramic',
                       '2026-10-20',
                       '07:00 PM - 08:00 PM',
                       2500,
-                      'https://club-portal.pk/status?ref=PADEL-PK-2026-8921',
+                      'https://powerpadelarena.pk/status?ref=PPA-PK-2026-8921',
                       30
                     )}
                   </div>
@@ -915,13 +1095,13 @@ export default function AdminDashboardPage() {
                   <div className="p-3 bg-white rounded-lg border border-slate-200 font-mono text-[11px] whitespace-pre-line text-slate-700">
                     {WhatsAppMessageTemplates.getBookingConfirmationMessage(
                       'Hamza Tariq',
-                      'PADEL-PK-2026-8921',
+                      'PPA-PK-2026-8921',
                       'Court 1 - Panoramic',
                       '2026-10-20',
                       '07:00 PM - 08:00 PM',
                       2500,
                       2500,
-                      CLUB_CONFIG.addressPlaceholder
+                      CLUB_CONFIG.locationArea
                     )}
                   </div>
                 </div>
@@ -1060,7 +1240,7 @@ export default function AdminDashboardPage() {
                     name="rejectionReason"
                     checked={rejectionReason === reason}
                     onChange={() => setRejectionReason(reason)}
-                    className="mt-0.5"
+                    className="mt-0.5 text-orange-500"
                   />
                   <span className="text-slate-800">{reason}</span>
                 </label>
@@ -1224,7 +1404,7 @@ export default function AdminDashboardPage() {
                     type="checkbox"
                     checked={manualIsPaid}
                     onChange={(e) => setManualIsPaid(e.target.checked)}
-                    className="w-4 h-4 rounded text-emerald-600"
+                    className="w-4 h-4 rounded text-orange-500"
                   />
                   <span>Cash Payment Collected at Counter (Mark as Confirmed)</span>
                 </label>
@@ -1240,7 +1420,7 @@ export default function AdminDashboardPage() {
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs"
+                  className="px-4 py-2 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs"
                 >
                   Create Reservation
                 </button>

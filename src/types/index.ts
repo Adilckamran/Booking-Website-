@@ -86,17 +86,25 @@ export interface MobileWalletDetails {
 }
 
 export interface BusinessConfig {
-  clubNamePlaceholder: string;
+  businessName: string;
+  clubNamePlaceholder: string; // for backward compatibility
   tagline: string;
+  businessEmail: string;
+  city: string;
   cityPlaceholder: string;
+  locationArea: string;
   addressPlaceholder: string;
+  googleMapsUrl: string;
+  instagramUrl: string;
+  facebookUrl: string;
+  logoPath: string;
   contactPhonePlaceholder: string;
   whatsappNumberPlaceholder: string;
   whatsappDisplayPlaceholder: string;
   currency: string;
   slotDurationMinutes: number;
   advancePercentage: number; // e.g. 50%
-  openingHour: string; // "07:00"
+  openingHour: string; // "08:00"
   closingHour: string; // "01:00" (next day)
   bankAccount: BankAccountDetails;
   easypaisaAccount: MobileWalletDetails;

@@ -123,27 +123,27 @@ function BookingPageContent() {
     <div className="min-h-screen bg-slate-50 pb-20">
       
       {/* Top Demo Banner */}
-      <DemoBanner message="DEMO BOOKING ENGINE: Real-time conflict protection & Supabase database integration will be connected in Phases 2-4. Slots shown here are for demonstration." />
+      <DemoBanner message="DEMO AVAILABILITY: Real database availability via Supabase will be connected in Phase 2. All slots shown here are for demonstration." />
 
       {/* Page Header */}
-      <div className="bg-slate-900 text-white py-10 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
+      <div className="bg-[#0A2540] text-white py-10 px-4 sm:px-6 lg:px-8 border-b border-slate-800">
         <div className="max-w-7xl mx-auto">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                Court Reservation
+              <span className="text-xs font-bold text-orange-400 uppercase tracking-wider">
+                Power Padel Arena • PECHS Karachi
               </span>
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight mt-1">
                 Book a Padel Court
               </h1>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1">
-                Select your preferred court, date, and 60-minute match slot.
+              <p className="text-xs sm:text-sm text-slate-200 mt-1">
+                Select your preferred court, date, and 60-minute match slot. No account required.
               </p>
             </div>
 
             {/* Quick Policy Notice */}
-            <div className="bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-700 text-xs text-slate-300 flex items-center gap-2.5 max-w-md">
-              <Info className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="bg-slate-800/90 px-4 py-2.5 rounded-xl border border-slate-700 text-xs text-slate-200 flex items-center gap-2.5 max-w-md">
+              <Info className="w-4 h-4 text-orange-400 shrink-0" />
               <span>
                 {CLUB_CONFIG.advancePercentage}% advance required within 30 mins to confirm reservation.
               </span>
@@ -162,7 +162,7 @@ function BookingPageContent() {
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-900 text-emerald-400 text-xs flex items-center justify-center font-bold">
+                  <span className="w-6 h-6 rounded-full bg-[#0A2540] text-orange-400 text-xs flex items-center justify-center font-bold">
                     1
                   </span>
                   <span>Select Court</span>
@@ -185,16 +185,16 @@ function BookingPageContent() {
                       }}
                       className={`text-left p-4 rounded-xl border transition-all relative ${
                         isSelected
-                          ? 'border-emerald-600 bg-emerald-50/40 ring-2 ring-emerald-500/20'
+                          ? 'border-orange-500 bg-orange-50/40 ring-2 ring-orange-500/20'
                           : 'border-slate-200 hover:border-slate-300 bg-white'
                       }`}
                     >
                       {isSelected && (
-                        <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center">
+                        <div className="absolute top-2.5 right-2.5 w-5 h-5 rounded-full bg-orange-500 text-white flex items-center justify-center">
                           <Check className="w-3.5 h-3.5 stroke-[3]" />
                         </div>
                       )}
-                      <span className="text-[10px] uppercase font-bold text-emerald-700 bg-emerald-100/70 px-2 py-0.5 rounded">
+                      <span className="text-[10px] uppercase font-bold text-orange-800 bg-orange-100/70 px-2 py-0.5 rounded">
                         {court.type}
                       </span>
                       <h3 className="font-bold text-sm text-slate-900 mt-2">{court.name}</h3>
@@ -215,7 +215,7 @@ function BookingPageContent() {
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-900 text-emerald-400 text-xs flex items-center justify-center font-bold">
+                  <span className="w-6 h-6 rounded-full bg-[#0A2540] text-orange-400 text-xs flex items-center justify-center font-bold">
                     2
                   </span>
                   <span>Select Date</span>
@@ -240,11 +240,11 @@ function BookingPageContent() {
                       }}
                       className={`shrink-0 flex flex-col items-center justify-center min-w-[85px] py-2.5 px-3 rounded-xl border text-center transition-all ${
                         isSelected
-                          ? 'bg-slate-900 text-white border-slate-900 shadow-sm'
+                          ? 'bg-[#0A2540] text-white border-[#0A2540] shadow-sm'
                           : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
                       }`}
                     >
-                      <span className={`text-[11px] font-medium ${isSelected ? 'text-emerald-400' : 'text-slate-500'}`}>
+                      <span className={`text-[11px] font-medium ${isSelected ? 'text-orange-400' : 'text-slate-500'}`}>
                         {item.dayName}
                       </span>
                       <span className="text-sm font-bold mt-0.5">{item.formatted}</span>
@@ -258,7 +258,7 @@ function BookingPageContent() {
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
                 <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                  <span className="w-6 h-6 rounded-full bg-slate-900 text-emerald-400 text-xs flex items-center justify-center font-bold">
+                  <span className="w-6 h-6 rounded-full bg-[#0A2540] text-orange-400 text-xs flex items-center justify-center font-bold">
                     3
                   </span>
                   <span>Available Time Slots (60 Mins)</span>
@@ -298,9 +298,9 @@ function BookingPageContent() {
 
                   let buttonStyles = '';
                   if (isSelected) {
-                    buttonStyles = 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-emerald-500/30';
+                    buttonStyles = 'bg-orange-500 text-white border-orange-600 ring-2 ring-orange-500/30';
                   } else if (isAvailable) {
-                    buttonStyles = 'bg-white hover:border-emerald-500 hover:bg-emerald-50/20 text-slate-900 border-slate-200';
+                    buttonStyles = 'bg-white hover:border-orange-500 hover:bg-orange-50/20 text-slate-900 border-slate-200';
                   } else if (isHeld) {
                     buttonStyles = 'bg-amber-50/70 border-amber-200 text-amber-800 cursor-not-allowed opacity-80';
                   } else {
@@ -355,7 +355,7 @@ function BookingPageContent() {
             
             <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm">
               <h2 className="text-base font-bold text-slate-900 mb-4 flex items-center gap-2">
-                <span className="w-6 h-6 rounded-full bg-slate-900 text-emerald-400 text-xs flex items-center justify-center font-bold">
+                <span className="w-6 h-6 rounded-full bg-[#0A2540] text-orange-400 text-xs flex items-center justify-center font-bold">
                   4
                 </span>
                 <span>Player Details</span>
@@ -374,7 +374,7 @@ function BookingPageContent() {
                       placeholder="e.g. Hamza Tariq"
                       value={customerName}
                       onChange={(e) => setCustomerName(e.target.value)}
-                      className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-orange-500 ${
                         formErrors.name ? 'border-rose-300 bg-rose-50/20' : 'border-slate-300'
                       }`}
                       required
@@ -397,7 +397,7 @@ function BookingPageContent() {
                       placeholder="+92 300 1234567"
                       value={customerPhone}
                       onChange={(e) => setCustomerPhone(e.target.value)}
-                      className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-emerald-500 ${
+                      className={`w-full pl-9 pr-3 py-2 text-sm rounded-lg border focus:outline-none focus:ring-2 focus:ring-orange-500 ${
                         formErrors.phone ? 'border-rose-300 bg-rose-50/20' : 'border-slate-300'
                       }`}
                       required
@@ -423,7 +423,7 @@ function BookingPageContent() {
                       placeholder="e.g. player@example.com"
                       value={customerEmail}
                       onChange={(e) => setCustomerEmail(e.target.value)}
-                      className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-orange-500"
                     />
                   </div>
                 </div>
@@ -456,7 +456,7 @@ function BookingPageContent() {
                         PKR {totalPrice.toLocaleString()}
                       </span>
                     </div>
-                    <div className="flex justify-between text-xs bg-emerald-50 text-emerald-900 p-2 rounded-lg font-medium">
+                    <div className="flex justify-between text-xs bg-orange-50 text-orange-950 p-2 rounded-lg font-medium border border-orange-200">
                       <span>{CLUB_CONFIG.advancePercentage}% Advance to Hold:</span>
                       <span className="font-bold">PKR {advanceAmount.toLocaleString()}</span>
                     </div>
@@ -471,7 +471,7 @@ function BookingPageContent() {
                 <button
                   type="submit"
                   disabled={!selectedSlot}
-                  className="w-full mt-4 py-3 px-4 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:bg-slate-200 disabled:text-slate-400 text-slate-950 font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
+                  className="w-full mt-4 py-3.5 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                 >
                   <span>Review Booking Request</span>
                   <ArrowRight className="w-4 h-4" />
@@ -481,7 +481,7 @@ function BookingPageContent() {
 
             {/* Verification Guarantee */}
             <div className="bg-slate-100 p-4 rounded-xl border border-slate-200 text-xs text-slate-600 flex items-start gap-2.5">
-              <ShieldAlert className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+              <ShieldAlert className="w-4 h-4 text-orange-500 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-slate-800">Advance Security Policy:</span>
                 <p className="mt-0.5 text-slate-600">
@@ -499,7 +499,7 @@ function BookingPageContent() {
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl max-w-lg w-full p-6 sm:p-7 shadow-2xl border border-slate-100 space-y-5 animate-in fade-in zoom-in-95 duration-150">
             <div>
-              <span className="text-[11px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 bg-orange-50 px-2 py-0.5 rounded">
                 Final Review
               </span>
               <h3 className="text-xl font-bold text-slate-900 mt-1">
@@ -532,7 +532,7 @@ function BookingPageContent() {
                 <span className="text-slate-500">WhatsApp:</span>
                 <span className="font-bold text-slate-900">{customerPhone}</span>
               </div>
-              <div className="flex justify-between py-1 text-emerald-800 font-bold bg-emerald-50/80 px-2 rounded">
+              <div className="flex justify-between py-1 text-orange-950 font-bold bg-orange-50 px-2 rounded border border-orange-200">
                 <span>Advance Required (50%):</span>
                 <span>PKR {advanceAmount.toLocaleString()}</span>
               </div>
@@ -563,7 +563,7 @@ function BookingPageContent() {
                 type="button"
                 onClick={handleConfirmBooking}
                 disabled={isSubmitting}
-                className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs shadow-md transition-all flex items-center gap-2"
+                className="px-5 py-2.5 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-bold text-xs shadow-md transition-all flex items-center gap-2"
               >
                 {isSubmitting ? (
                   <span>Generating Booking...</span>
