@@ -1,4 +1,4 @@
-export type CourtType = 'panoramic' | 'indoor' | 'outdoor' | 'standard';
+export type CourtType = 'double' | 'single' | 'panoramic' | 'indoor' | 'outdoor' | 'standard';
 
 export interface Court {
   id: string;
@@ -38,11 +38,19 @@ export type PaymentMethod = 'bank_transfer' | 'easypaisa' | 'jazzcash' | 'cash_a
 
 export interface PaymentSubmission {
   method: PaymentMethod;
-  transactionRef: string;
+  transactionRef?: string;
   screenshotFile?: File;
   screenshotPreviewUrl?: string;
   submittedAt: string;
   notes?: string;
+}
+
+export interface BookingSlotItem {
+  startTime: string; // e.g. "09:00"
+  endTime: string;   // e.g. "10:00"
+  label?: string;    // e.g. "09:00 AM - 10:00 AM"
+  price?: number;    // e.g. 3500
+  isPeak?: boolean;
 }
 
 export interface Booking {
@@ -51,9 +59,10 @@ export interface Booking {
   courtId: string;
   courtName: string;
   date: string; // "YYYY-MM-DD"
-  startTime: string; // "18:00"
-  endTime: string; // "19:00"
+  startTime: string; // "18:00" (primary or first slot)
+  endTime: string; // "19:00" (or end of first/last slot)
   durationMinutes: number;
+  slots?: BookingSlotItem[]; // Multiple independent 1-hour slots
   totalAmount: number; // PKR
   advanceRequiredAmount: number; // PKR
   remainingAmount: number; // PKR
@@ -103,11 +112,28 @@ export interface BusinessConfig {
   whatsappDisplayPlaceholder: string;
   currency: string;
   slotDurationMinutes: number;
-  advancePercentage: number; // e.g. 50%
+  advanceType: 'percentage' | 'fixed'; // 'fixed' deposit or 'percentage'
+  advanceFixedAmount: number; // e.g. 500 PKR fixed advance
+  advancePercentage: number; // e.g. 50% fallback
+  paymentDeadlineMinutes: number; // e.g. 60 minutes temporary hold window
+  isPricingConfirmed: boolean; // Flag indicating if prices are confirmed or placeholder
   openingHour: string; // "08:00"
   closingHour: string; // "01:00" (next day)
   bankAccount: BankAccountDetails;
   easypaisaAccount: MobileWalletDetails;
-  jazzcashAccount: MobileWalletDetails;
+  jazzcashAccount?: MobileWalletDetails;
   termsSummary: string[];
+}
+
+export interface AdminNotification {
+  id: string;
+  bookingRef: string;
+  type: 'receipt_submitted' | 'slot_held' | 'booking_confirmed' | 'booking_rejected';
+  title: string;
+  message: string;
+  customerName: string;
+  customerPhone: string;
+  advanceAmount: number;
+  isRead: boolean;
+  createdAt: string;
 }

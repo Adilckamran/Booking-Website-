@@ -9,7 +9,6 @@ import {
   CheckCircle2,
   ArrowRight,
   MessageCircle,
-  CreditCard,
   ExternalLink,
   ShieldCheck,
   Sparkles,
@@ -20,60 +19,52 @@ export default function HomePage() {
     <div className="flex flex-col min-h-screen bg-white">
       
       {/* 1. STRONG HERO SECTION */}
-      <section className="relative bg-[#0A2540] text-white overflow-hidden py-16 sm:py-24 lg:py-28 border-b border-slate-800">
+      <section className="relative bg-[#0A2540] text-white overflow-hidden py-14 sm:py-24 lg:py-28 border-b border-slate-800">
         {/* Subtle geometric sports court line background */}
         <div className="absolute inset-0 opacity-5 bg-[linear-gradient(to_right,#ffffff_1px,transparent_1px),linear-gradient(to_bottom,#ffffff_1px,transparent_1px)] bg-[size:4rem_4rem] pointer-events-none" />
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10">
-          <div className="max-w-3xl space-y-6">
+          <div className="max-w-3xl space-y-5 sm:space-y-6">
             
             {/* Pill Location Badge */}
             <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-orange-500/10 border border-orange-500/30 text-orange-400 text-xs sm:text-sm font-bold tracking-wide">
-              <Sparkles className="w-4 h-4 text-orange-400" />
+              <Sparkles className="w-4 h-4 text-orange-400 shrink-0" />
               <span>PECHS • Karachi • Pakistan</span>
             </div>
 
             {/* Main Headline */}
-            <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.1]">
+            <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-[1.15] sm:leading-[1.1]">
               Welcome to <br />
               <span className="text-white">Power Padel </span>
               <span className="text-orange-500">Arena</span>
             </h1>
 
             {/* Subtitle */}
-            <p className="text-slate-200 text-base sm:text-lg sm:leading-relaxed max-w-2xl font-normal">
+            <p className="text-slate-200 text-sm sm:text-lg sm:leading-relaxed max-w-2xl font-normal">
               Karachi’s premier destination for high-intensity padel. Book professional panoramic courts, tournament-grade turf, and match floodlights in seconds — no account required.
             </p>
 
-            {/* Action CTA Buttons */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3.5 pt-4">
+            {/* Action CTA Button */}
+            <div className="pt-2 sm:pt-4">
               <Link
                 href="/book"
-                className="inline-flex items-center justify-center gap-2.5 px-7 py-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-base shadow-lg shadow-orange-500/25 transition-all hover:scale-[1.02] active:scale-[0.98]"
+                className="inline-flex items-center justify-center gap-2.5 px-6 sm:px-8 py-3.5 sm:py-4 rounded-xl bg-orange-500 hover:bg-orange-600 text-white font-extrabold text-sm sm:text-base shadow-lg shadow-orange-500/25 transition-all hover:scale-[1.02] active:scale-[0.98] w-full sm:w-auto"
               >
-                <Calendar className="w-5 h-5" />
+                <Calendar className="w-5 h-5 shrink-0" />
                 <span>Book a Court</span>
-                <ArrowRight className="w-4 h-4 ml-1" />
-              </Link>
-
-              <Link
-                href="/status"
-                className="inline-flex items-center justify-center gap-2 px-6 py-4 rounded-xl bg-slate-800/90 hover:bg-slate-800 text-white font-bold text-sm border border-slate-700 hover:border-slate-600 transition-colors"
-              >
-                <CreditCard className="w-4 h-4 text-emerald-400" />
-                <span>Upload Receipt / Check Status</span>
+                <ArrowRight className="w-4 h-4 ml-1 shrink-0" />
               </Link>
             </div>
 
             {/* Highlights Bar */}
-            <div className="pt-6 flex flex-wrap items-center gap-4 sm:gap-6 text-xs text-slate-300">
+            <div className="pt-4 sm:pt-6 flex flex-wrap items-center gap-3 sm:gap-6 text-xs text-slate-300">
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
                 <span>Instant Slot Reservation</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-orange-400 shrink-0" />
-                <span>Bank Transfer / Easypaisa / JazzCash</span>
+                <span>Bank Transfer / Easypaisa</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -161,7 +152,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6">
             
             {/* Step 1 */}
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col justify-between hover:border-orange-300 transition-all">
@@ -187,11 +178,11 @@ export default function HomePage() {
                 </div>
                 <h3 className="font-bold text-base text-[#0A2540] mb-1">Enter Details</h3>
                 <p className="text-slate-600 text-xs leading-relaxed">
-                  Enter player name and WhatsApp number. Your selected slot is held temporarily for 30 minutes.
+                  Enter player name and WhatsApp number. Your selected slot is held temporarily for 60 minutes.
                 </p>
               </div>
               <span className="mt-4 text-[11px] font-bold text-orange-700 bg-orange-50 px-2.5 py-1 rounded-md w-fit">
-                Held for 30 mins
+                Held for 60 mins
               </span>
             </div>
 
@@ -201,9 +192,9 @@ export default function HomePage() {
                 <div className="w-10 h-10 rounded-xl bg-orange-500 text-white flex items-center justify-center font-extrabold text-sm mb-4">
                   03
                 </div>
-                <h3 className="font-bold text-base text-[#0A2540] mb-1">Pay 50% Advance</h3>
+                <h3 className="font-bold text-base text-[#0A2540] mb-1">Pay PKR 500 Advance</h3>
                 <p className="text-slate-600 text-xs leading-relaxed">
-                  Transfer advance via Bank Transfer, Easypaisa, or JazzCash and upload your receipt screenshot with TRX ID.
+                  Transfer PKR 500 advance via Easypaisa or Faysal Bank and upload your receipt screenshot with TRX ID.
                 </p>
               </div>
               <span className="mt-4 text-[11px] font-bold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-md w-fit">
@@ -283,7 +274,7 @@ export default function HomePage() {
                   <div>
                     <span className="font-bold text-[#0A2540] text-sm block">Arena Timings</span>
                     <p className="text-slate-600">
-                      Monday to Sunday: {CLUB_CONFIG.openingHour} AM – {CLUB_CONFIG.closingHour} AM (Midnight)
+                      Open 24 Hours / 7 Days a Week (00:00 – 24:00)
                     </p>
                   </div>
                 </div>

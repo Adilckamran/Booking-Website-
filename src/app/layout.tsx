@@ -19,6 +19,10 @@ export const metadata: Metadata = {
   title: `${CLUB_CONFIG.businessName} - Karachi's Premier Padel Experience (PECHS)`,
   description:
     'Reserve professional panoramic padel courts in PECHS, Karachi at Power Padel Arena. Instant slot holds, seamless advance payment via Bank Transfer, Easypaisa, or JazzCash, and fast booking verification.',
+  icons: {
+    icon: '/logo.png',
+    apple: '/logo.png',
+  },
 };
 
 export default function RootLayout({
