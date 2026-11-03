@@ -11,7 +11,7 @@ import { WhatsAppMessageTemplates, WHATSAPP_SETUP_CHECKLIST } from '@/services/w
 import { Booking, AdminNotification } from '@/types';
 import { getSupabaseClient, isSupabaseConfigured } from '@/services/database/supabaseClient';
 import { calculateBookingPrice } from '@/services/pricing/pricingService';
-import { getKarachiDateString } from '@/utils/timezone';
+import { getKarachiDateString, getKarachiTimestamp } from '@/utils/timezone';
 import {
   Search,
   CheckCircle,
@@ -1260,11 +1260,22 @@ export default function AdminDashboardPage() {
                         </div>
                         <div className="p-3 space-y-1.5 bg-slate-50 max-h-[520px] overflow-y-auto">
                           {OPERATING_SLOTS_DEF.map((slotDef, sIdx) => {
-                            const matchedBooking = courtBookings.find((b) =>
-                              b.slots && b.slots.length > 0
-                                ? b.slots.some((s) => s.startTime === slotDef.startTime)
-                                : b.startTime === slotDef.startTime
-                            );
+                            const activeDate = dateFilter === 'all' ? (courtBookings[0]?.date || getKarachiDateString()) : dateFilter;
+                            const slotStartMs = getKarachiTimestamp(activeDate, slotDef.startTime);
+                            const slotEndMs = slotStartMs + 30 * 60 * 1000;
+
+                            const matchedBooking = courtBookings.find((b) => {
+                              const bDate = b.date || activeDate;
+                              const bStartMs = getKarachiTimestamp(bDate, b.startTime);
+                              const bEndMs = bStartMs + (b.durationMinutes || 60) * 60 * 1000;
+                              if (slotStartMs < bEndMs && slotEndMs > bStartMs) {
+                                return true;
+                              }
+                              if (b.slots && b.slots.length > 0) {
+                                return b.slots.some((s) => s.startTime === slotDef.startTime);
+                              }
+                              return false;
+                            });
 
                             return (
                               <div
@@ -2237,9 +2248,9 @@ export default function AdminDashboardPage() {
                       onChange={(e) => setManualDurationMinutes(parseInt(e.target.value, 10))}
                       className="w-full p-2.5 rounded-xl border border-slate-300 bg-white"
                     >
-                      <option value={60}>60 minutes (1 Hour)</option>
-                      <option value={120}>120 minutes (2 Hours)</option>
-                      <option value={180}>180 minutes (3 Hours)</option>
+                      <option value={60}>60 minutes (1.0 Hour)</option>
+                      <option value={90}>90 minutes (1.5 Hours)</option>
+                      <option value={120}>120 minutes (2.0 Hours)</option>
                     </select>
                   </div>
                 </div>

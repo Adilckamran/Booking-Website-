@@ -7,7 +7,9 @@ import { DEMO_COURTS, getDemoSlotsForCourt } from '@/data/demoData';
 import { CLUB_CONFIG } from '@/config/clubConfig';
 import { StatusBadge } from '@/components/common/StatusBadge';
 import {
-  calculateMultipleSlotsPrice,
+  calculateBookingPrice,
+  calculateEndTime,
+  formatTime12,
 } from '@/services/pricing/pricingService';
 import { validateReceiptFile, RECEIPT_STORAGE_CONFIG } from '@/services/storage/receiptStorage';
 import { validatePakistaniMobile } from '@/utils/phoneValidation';
@@ -77,7 +79,7 @@ function BookingPageContent() {
   }, [karachiToday]);
 
   const [selectedDate, setSelectedDate] = useState<string>(availableDates[0].iso);
-  const [selectedSlots, setSelectedSlots] = useState<TimeSlot[]>([]);
+  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [prevFirstDate, setPrevFirstDate] = useState(availableDates[0].iso);
 
   // If the business day advances while the tab is open, roll selected date forward
@@ -85,14 +87,9 @@ function BookingPageContent() {
     setPrevFirstDate(availableDates[0].iso);
     if (selectedDate < availableDates[0].iso) {
       setSelectedDate(availableDates[0].iso);
-      setSelectedSlots([]);
+      setSelectedSlot(null);
     }
   }
-
-  // Duration-based slot requirements (60m = 1 slot, 120m = 2 slots, 180m = 3 slots)
-  const requiredSlotCount = useMemo(() => {
-    return Math.max(1, Math.round(durationMinutes / 60));
-  }, [durationMinutes]);
 
   // Customer form inputs
   const [customerName, setCustomerName] = useState('');
@@ -135,10 +132,10 @@ function BookingPageContent() {
     return DEMO_COURTS.find((c) => c.id === selectedCourtId) || DEMO_COURTS[0];
   }, [selectedCourtId]);
 
-  // Fetch slot availability from server API
-  const fetchAvailability = useCallback(async (courtId: string, date: string) => {
+  // Fetch slot availability from server API (with selected match duration)
+  const fetchAvailability = useCallback(async (courtId: string, date: string, dur: number = durationMinutes) => {
     try {
-      const res = await fetch(`/api/availability?courtId=${courtId}&date=${date}`);
+      const res = await fetch(`/api/availability?courtId=${courtId}&date=${date}&duration=${dur}`);
       if (res.ok) {
         const data = await res.json();
         if (data.slots && Array.isArray(data.slots)) {
@@ -151,18 +148,18 @@ function BookingPageContent() {
     } finally {
       setIsLoadingSlots(false);
     }
-  }, []);
+  }, [durationMinutes]);
 
   const handleManualRefresh = () => {
     setIsLoadingSlots(true);
-    fetchAvailability(selectedCourtId, selectedDate);
+    fetchAvailability(selectedCourtId, selectedDate, durationMinutes);
   };
 
   useEffect(() => {
     let isMounted = true;
     const loadAvailability = async () => {
       try {
-        const res = await fetch(`/api/availability?courtId=${selectedCourtId}&date=${selectedDate}`);
+        const res = await fetch(`/api/availability?courtId=${selectedCourtId}&date=${selectedDate}&duration=${durationMinutes}`);
         if (!isMounted) return;
         if (res.ok) {
           const data = await res.json();
@@ -180,9 +177,9 @@ function BookingPageContent() {
     return () => {
       isMounted = false;
     };
-  }, [selectedCourtId, selectedDate]);
+  }, [selectedCourtId, selectedDate, durationMinutes]);
 
-  // Handle slot selection toggle (supports any independent, non-consecutive 1-hour slots)
+  // Handle single start time selection (covers full durationMinutes interval)
   const handleSlotToggle = useCallback(
     (slot: TimeSlot) => {
       if (slot.status !== 'available') return;
@@ -191,68 +188,32 @@ function BookingPageContent() {
         setFormErrors((prev) => ({ ...prev, slot: '' }));
       }
 
-      const isAlreadySelected = selectedSlots.some((s) => s.startTime === slot.startTime);
-
-      if (isAlreadySelected) {
-        // Deselect clicked slot
-        setSelectedSlots((prev) => prev.filter((s) => s.startTime !== slot.startTime));
-        return;
+      if (selectedSlot?.startTime === slot.startTime) {
+        setSelectedSlot(null);
+      } else {
+        setSelectedSlot(slot);
       }
-
-      // If exactly 1 slot is required (60 mins), clicking another slot replaces it
-      if (requiredSlotCount === 1) {
-        setSelectedSlots([slot]);
-        return;
-      }
-
-      // If under limit, append the slot
-      if (selectedSlots.length < requiredSlotCount) {
-        setSelectedSlots((prev) =>
-          [...prev, slot].sort((a, b) => getOperatingScheduleMinutes(a.startTime) - getOperatingScheduleMinutes(b.startTime))
-        );
-        return;
-      }
-
-      // If already at required slot count, replace the last chosen slot
-      setSelectedSlots((prev) => {
-        const next = [...prev.slice(0, requiredSlotCount - 1), slot];
-        return next.sort((a, b) => getOperatingScheduleMinutes(a.startTime) - getOperatingScheduleMinutes(b.startTime));
-      });
     },
-    [formErrors.slot, requiredSlotCount, selectedSlots]
+    [formErrors.slot, selectedSlot]
   );
 
-  const handleRemoveSlot = useCallback((startTime: string) => {
-    setSelectedSlots((prev) => prev.filter((s) => s.startTime !== startTime));
-  }, []);
-
-  // Duration change handler: preserves selected slots up to new required limit
+  // Duration change handler: switches duration and clears selection
   const handleDurationChange = useCallback((newDuration: number) => {
     setDurationMinutes(newDuration);
-    const newReqCount = Math.max(1, Math.round(newDuration / 60));
-    setSelectedSlots((prev) => prev.slice(0, newReqCount));
+    setSelectedSlot(null);
     if (formErrors.slot) {
       setFormErrors((prev) => ({ ...prev, slot: '' }));
     }
   }, [formErrors.slot]);
 
-  // Pricing calculation across all independently chosen slots
+  // Pricing calculation across full duration
   const pricingCalculation = useMemo(() => {
-    if (selectedSlots.length > 0) {
-      return calculateMultipleSlotsPrice(
-        selectedCourtId,
-        selectedSlots.map((s) => s.startTime)
-      );
+    if (selectedSlot) {
+      return calculateBookingPrice(selectedCourtId, selectedSlot.startTime, durationMinutes);
     }
-    // Preview baseline pricing when no slots selected yet
-    const placeholderSlots: string[] = [];
-    const baseHour = 18;
-    for (let i = 0; i < requiredSlotCount; i++) {
-      const h = (baseHour + i) % 24;
-      placeholderSlots.push(`${String(h).padStart(2, '0')}:00`);
-    }
-    return calculateMultipleSlotsPrice(selectedCourtId, placeholderSlots);
-  }, [selectedCourtId, selectedSlots, requiredSlotCount]);
+    // Preview baseline pricing at 18:00
+    return calculateBookingPrice(selectedCourtId, '18:00', durationMinutes);
+  }, [selectedCourtId, selectedSlot, durationMinutes]);
 
   // Copy helper with toast
   const handleCopyText = async (text: string, label: string) => {
@@ -314,11 +275,9 @@ function BookingPageContent() {
     setServerErrorType(null);
     setUploadError(null);
 
-    // 1. Validate slot selection: must match required count exactly
-    if (selectedSlots.length !== requiredSlotCount) {
-      errors.slot = `Please select exactly ${requiredSlotCount} one-hour time slot${
-        requiredSlotCount > 1 ? 's' : ''
-      } for your ${durationMinutes}-minute match. (${selectedSlots.length} selected).`;
+    // 1. Validate slot selection: exactly one start time covering the entire match duration
+    if (!selectedSlot) {
+      errors.slot = `Please select an available start time for your ${durationMinutes}-minute match.`;
     }
 
     // 2. Validate customer full name (min 3 characters)
@@ -353,9 +312,8 @@ function BookingPageContent() {
     try {
       let res: Response;
       const normalizedPhone = phoneVal.normalized!;
-      const sortedSelectedSlots = [...selectedSlots].sort((a, b) => getOperatingScheduleMinutes(a.startTime) - getOperatingScheduleMinutes(b.startTime));
-      const slotStartTimes = sortedSelectedSlots.map((s) => s.startTime);
-      const primaryStartTime = slotStartTimes[0];
+      const primaryStartTime = selectedSlot!.startTime;
+      const slotStartTimes = [primaryStartTime];
 
       if (mode === 'with_receipt' && receiptFile) {
         const formData = new FormData();
@@ -408,8 +366,8 @@ function BookingPageContent() {
         if (mode === 'with_receipt') setUploadProgress(null);
         if (data.isConflict) {
           setServerErrorType('conflict');
-          setServerError(data.error || 'One or more of the selected slots could not be reserved due to an existing reservation.');
-          await fetchAvailability(selectedCourtId, selectedDate);
+          setServerError(data.error || 'The selected time range could not be reserved due to an existing reservation.');
+          await fetchAvailability(selectedCourtId, selectedDate, durationMinutes);
         } else if (data.isPermissionOrDb) {
           setServerErrorType('permission');
           setServerError(data.error);
@@ -435,7 +393,7 @@ function BookingPageContent() {
   // Reset page to place a new booking
   const handleResetForNewBooking = () => {
     setCompletedBooking(null);
-    setSelectedSlots([]);
+    setSelectedSlot(null);
     setReceiptFile(null);
     setReceiptPreview(null);
     setFileName('');
@@ -443,7 +401,7 @@ function BookingPageContent() {
     setTransactionRef('');
     setServerError(null);
     setFormErrors({});
-    fetchAvailability(selectedCourtId, selectedDate);
+    fetchAvailability(selectedCourtId, selectedDate, durationMinutes);
   };
 
   return (
@@ -663,7 +621,7 @@ function BookingPageContent() {
                         type="button"
                         onClick={() => {
                           setSelectedCourtId(court.id);
-                          setSelectedSlots([]);
+                          setSelectedSlot(null);
                         }}
                         className={`text-left p-4 rounded-xl border transition-all relative cursor-pointer ${
                           isSelected
@@ -720,15 +678,15 @@ function BookingPageContent() {
                   </h2>
                   <div className="flex items-center gap-1 text-xs text-slate-500 font-medium">
                     <Clock className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Independent & Non-consecutive Slots Supported</span>
+                    <span>60, 90, or 120 Minutes</span>
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 sm:gap-3">
                   {[
-                    { minutes: 60, label: '60 Minutes (1 Hour)', desc: '1 slot required' },
-                    { minutes: 120, label: '120 Minutes (2 Hours)', desc: '2 independent slots' },
-                    { minutes: 180, label: '180 Minutes (3 Hours)', desc: '3 independent slots' },
+                    { minutes: 60, label: '60 Minutes (1.0 Hr)', desc: 'Standard match session' },
+                    { minutes: 90, label: '90 Minutes (1.5 Hrs)', desc: 'Extended match session' },
+                    { minutes: 120, label: '120 Minutes (2.0 Hrs)', desc: 'Full tournament / 2 hours' },
                   ].map((dur) => {
                     const isSelected = durationMinutes === dur.minutes;
                     return (
@@ -763,7 +721,7 @@ function BookingPageContent() {
                   </h2>
                   <span className="text-xs text-slate-500 font-medium flex items-center gap-1">
                     <CalendarIcon className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Next 7 Days</span>
+                    <span>Next 7 Days (PKT)</span>
                   </span>
                 </div>
 
@@ -776,7 +734,7 @@ function BookingPageContent() {
                         type="button"
                         onClick={() => {
                           setSelectedDate(item.iso);
-                          setSelectedSlots([]);
+                          setSelectedSlot(null);
                         }}
                         className={`p-2.5 rounded-xl border text-center transition-all flex flex-col items-center justify-center cursor-pointer ${
                           isSelected
@@ -802,19 +760,19 @@ function BookingPageContent() {
                       <span className="w-6 h-6 rounded-full bg-[#0A2540] text-orange-400 text-xs flex items-center justify-center font-bold">
                         4
                       </span>
-                      <span>Select Time Slots</span>
+                      <span>Select Match Start Time</span>
                       <span
                         className={`text-xs font-bold px-2.5 py-0.5 rounded-full border ${
-                          selectedSlots.length === requiredSlotCount
+                          selectedSlot
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : 'bg-amber-50 text-amber-800 border-amber-200'
                         }`}
                       >
-                        {selectedSlots.length} of {requiredSlotCount} selected
+                        {selectedSlot ? '1 of 1 selected' : '0 of 1 selected'}
                       </span>
                     </h2>
                     <p className="text-xs text-slate-500 mt-1">
-                      Choose any {requiredSlotCount} available 1-hour slot{requiredSlotCount > 1 ? 's' : ''}. Slots can be non-consecutive (e.g. morning and evening). Click a selected slot to deselect.
+                      Start times are available every 30 minutes 24/7. Select an available start time to reserve your full {durationMinutes}-minute session.
                     </p>
                   </div>
 
@@ -847,37 +805,29 @@ function BookingPageContent() {
                   </div>
                 </div>
 
-                {/* Selected Slots Chips (Quick Dismiss) */}
-                {selectedSlots.length > 0 && (
-                  <div className="mb-4 p-3 rounded-xl bg-orange-50/60 border border-orange-200 flex flex-wrap items-center gap-2">
-                    <span className="text-xs font-bold text-orange-950 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-orange-600" />
-                      <span>Selected ({selectedSlots.length}/{requiredSlotCount}):</span>
-                    </span>
-                    {selectedSlots.map((slot) => (
-                      <span
-                        key={slot.startTime}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white border border-orange-300 text-slate-800 text-xs font-semibold shadow-sm"
+                {/* Selected Slot Banner */}
+                {selectedSlot && (
+                  <div className="mb-4 p-3 rounded-xl bg-orange-50/60 border border-orange-200 flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-orange-600 shrink-0" />
+                      <div className="text-xs text-slate-900">
+                        <span className="font-bold">Selected Session: </span>
+                        <span className="font-semibold text-slate-800">{selectedSlot.label}</span>
+                        <span className="text-slate-500 ml-1.5">({durationMinutes} Minutes)</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <span className="text-xs font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                        PKR {selectedSlot.price.toLocaleString()}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedSlot(null)}
+                        className="text-xs text-rose-600 hover:text-rose-800 font-medium underline cursor-pointer"
                       >
-                        <span>{slot.label}</span>
-                        <span className="text-emerald-700 font-bold">
-                          PKR {slot.price.toLocaleString()}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSlot(slot.startTime)}
-                          className="w-4 h-4 rounded-full bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 flex items-center justify-center text-[10px] transition-colors cursor-pointer"
-                          title="Deselect slot"
-                        >
-                          ✕
-                        </button>
-                      </span>
-                    ))}
-                    {selectedSlots.length < requiredSlotCount && (
-                      <span className="text-xs text-orange-800 italic">
-                        Select {requiredSlotCount - selectedSlots.length} more slot{requiredSlotCount - selectedSlots.length > 1 ? 's' : ''} to complete booking
-                      </span>
-                    )}
+                        Change
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -888,13 +838,13 @@ function BookingPageContent() {
                   </div>
                 )}
 
-                {/* Slots Grid */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                {/* Slots Grid: 48 30-minute start times */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2">
                   {slots.map((slot) => {
                     const isAvailable = slot.status === 'available';
                     const isHeld = slot.status === 'held';
                     const isBooked = slot.status === 'booked';
-                    const isSelected = selectedSlots.some((s) => s.startTime === slot.startTime);
+                    const isSelected = selectedSlot?.startTime === slot.startTime;
 
                     let buttonStyles = '';
                     if (isSelected) {
@@ -913,18 +863,22 @@ function BookingPageContent() {
                         type="button"
                         disabled={!isAvailable && !isSelected}
                         onClick={() => handleSlotToggle(slot)}
-                        className={`p-3 rounded-xl border text-center transition-all flex flex-col justify-center items-center ${buttonStyles}`}
+                        className={`p-2.5 rounded-xl border text-center transition-all flex flex-col justify-center items-center ${buttonStyles}`}
                       >
-                        <span className="text-xs font-bold leading-tight">{slot.label}</span>
+                        <span className="text-xs font-bold leading-tight">{slot.startTime}</span>
+                        <span className={`text-[10px] mt-0.5 ${isSelected ? 'text-orange-100' : 'text-slate-500'}`}>
+                          to {slot.endTime}
+                        </span>
+
                         <div className="mt-1 flex items-center gap-1">
                           {isSelected ? (
-                            <span className="text-[11px] font-bold text-white flex items-center gap-1">
+                            <span className="text-[11px] font-bold text-white flex items-center gap-0.5">
                               <Check className="w-3 h-3 stroke-[3]" />
                               <span>PKR {slot.price.toLocaleString()}</span>
                             </span>
                           ) : isAvailable ? (
                             <span className="text-[11px] text-emerald-600 font-semibold">
-                              PKR {slot.price.toLocaleString()}/hr
+                              PKR {slot.price.toLocaleString()}
                             </span>
                           ) : null}
 
@@ -938,15 +892,11 @@ function BookingPageContent() {
                               Booked
                             </span>
                           )}
-                          {slot.isPeak && isAvailable && !isSelected && (
-                            <span className="text-[9px] uppercase px-1 rounded bg-slate-100 text-slate-600">
-                              Peak
-                            </span>
-                          )}
                         </div>
-                        {isSelected && (
-                          <span className="text-[9px] text-orange-100 mt-0.5">
-                            Click to deselect
+
+                        {slot.isPeak && isAvailable && !isSelected && (
+                          <span className="text-[8px] uppercase tracking-wider px-1 mt-0.5 rounded bg-slate-100 text-slate-600 font-semibold">
+                            Peak
                           </span>
                         )}
                       </button>
@@ -1326,21 +1276,21 @@ function BookingPageContent() {
                       <span className="font-semibold text-slate-900">{activeCourt.name}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-slate-500">Selected Slots:</span>
+                      <span className="text-slate-500">Selected Session:</span>
                       <span className="font-semibold text-slate-900 text-right">
-                        {selectedSlots.length > 0
-                          ? `${selectedDate} • ${selectedSlots.map((s) => s.startTime).join(', ')} (${durationMinutes} mins)`
-                          : `${selectedDate} (Select ${requiredSlotCount} slot${requiredSlotCount > 1 ? 's' : ''})`}
+                        {selectedSlot
+                          ? `${selectedDate} • ${selectedSlot.startTime} to ${selectedSlot.endTime} (${durationMinutes} mins)`
+                          : `${selectedDate} (Select a start time)`}
                       </span>
                     </div>
 
-                    {/* Hourly Breakdown for Selected Slots */}
-                    {selectedSlots.length > 0 && (
+                    {/* Pricing Breakdown for Selected Slot */}
+                    {selectedSlot && (
                       <div className="p-2.5 rounded-lg bg-slate-50 border border-slate-200 space-y-1.5">
                         <div className="flex justify-between items-center text-[11px] font-bold text-slate-700">
-                          <span>Slot Pricing Breakdown:</span>
+                          <span>Rate Breakdown (30-min segments):</span>
                           <span className="text-orange-600 font-mono">
-                            {selectedSlots.length} of {requiredSlotCount} selected
+                            {durationMinutes} Minutes
                           </span>
                         </div>
                         {pricingCalculation.segments.map((seg, idx) => (
@@ -1412,16 +1362,13 @@ function BookingPageContent() {
                   <button
                     type="button"
                     onClick={() => handleBookingSubmit('with_receipt')}
-                    disabled={isSubmitting || selectedSlots.length !== requiredSlotCount}
+                    disabled={isSubmitting || !selectedSlot}
                     className="w-full py-4 px-4 rounded-xl bg-orange-500 hover:bg-orange-600 disabled:bg-slate-300 text-white font-extrabold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer disabled:cursor-not-allowed"
                   >
                     {isSubmitting ? (
                       <span>Submitting Booking & Receipt...</span>
-                    ) : selectedSlots.length < requiredSlotCount ? (
-                      <span>
-                        Select {requiredSlotCount - selectedSlots.length} More Slot
-                        {requiredSlotCount - selectedSlots.length > 1 ? 's' : ''} to Proceed
-                      </span>
+                    ) : !selectedSlot ? (
+                      <span>Select a Start Time to Proceed</span>
                     ) : (
                       <>
                         <span>Confirm Booking & Submit Receipt</span>
@@ -1430,19 +1377,17 @@ function BookingPageContent() {
                     )}
                   </button>
 
-                  {/* SECONDARY OPTION: RESERVE & PAY WITHIN 60 MINS */}
+                  {/* SECONDARY OPTION: RESERVE & PAY WITHIN 15 MINS */}
                   <div className="text-center pt-1">
                     <button
                       type="button"
                       onClick={() => handleBookingSubmit('pay_later')}
-                      disabled={isSubmitting || selectedSlots.length !== requiredSlotCount}
+                      disabled={isSubmitting || !selectedSlot}
                       className="text-xs text-slate-600 hover:text-slate-900 underline font-medium transition-colors cursor-pointer disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
                     >
-                      {selectedSlots.length < requiredSlotCount
-                        ? `Select ${requiredSlotCount - selectedSlots.length} more slot${
-                            requiredSlotCount - selectedSlots.length > 1 ? 's' : ''
-                          } to reserve & pay later`
-                        : 'Or reserve slots first & pay within 60 mins'}
+                      {!selectedSlot
+                        ? 'Select a start time to reserve & pay later'
+                        : `Or reserve start time first & pay within ${CLUB_CONFIG.paymentDeadlineMinutes} mins`}
                     </button>
                   </div>
                 </div>

@@ -51,9 +51,16 @@ export async function POST(request: NextRequest) {
     }
 
     const parsedDuration = parseInt(String(durationMinutes), 10) || 60;
-    if (parsedDuration < 60 || parsedDuration % 60 !== 0) {
+    if (![60, 90, 120].includes(parsedDuration)) {
       return NextResponse.json(
-        { success: false, error: 'Duration must be in 60-minute increments (60, 120, etc.).' },
+        { success: false, error: 'Duration must be strictly 60, 90, or 120 minutes.' },
+        { status: 400 }
+      );
+    }
+
+    if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
+      return NextResponse.json(
+        { success: false, error: 'Start time must be in 30-minute intervals (HH:00 or HH:30).' },
         { status: 400 }
       );
     }

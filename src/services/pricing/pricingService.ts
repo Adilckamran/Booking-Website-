@@ -3,32 +3,41 @@
  * 
  * BUSINESS SPECIFICATION:
  * - Court 1 (Double Court):
- *   - Off-peak: PKR 3,500/hr (6:00 AM to before 6:00 PM)
- *   - Peak: PKR 4,000/hr (6:00 PM to before 6:00 AM)
+ *   - Off-peak: PKR 3,500/hr (PKR 1,750 per 30 mins) from 6:00 AM to before 6:00 PM (06:00 - 18:00)
+ *   - Peak: PKR 4,000/hr (PKR 2,000 per 30 mins) from 6:00 PM to before 6:00 AM (18:00 - 06:00)
  * - Court 2 (Double Court):
- *   - Off-peak: PKR 3,500/hr (6:00 AM to before 6:00 PM)
- *   - Peak: PKR 4,000/hr (6:00 PM to before 6:00 AM)
+ *   - Off-peak: PKR 3,500/hr (PKR 1,750 per 30 mins) from 6:00 AM to before 6:00 PM (06:00 - 18:00)
+ *   - Peak: PKR 4,000/hr (PKR 2,000 per 30 mins) from 6:00 PM to before 6:00 AM (18:00 - 06:00)
  * - Court 3 (Single Court):
- *   - Fixed: PKR 2,000/hr all day and night (no peak/off-peak pricing)
+ *   - Fixed: PKR 2,000/hr (PKR 1,000 per 30 mins) throughout all 24 hours (no peak pricing)
  * 
  * ADVANCE PAYMENT:
  * - Fixed PKR 500 per booking.
+ * 
+ * DURATIONS SUPPORTED:
+ * - Strictly 60, 90, and 120 minutes with 30-minute starting interval granularity.
  */
 
-export interface HourlySegment {
+import { formatTime12, calculateEndTime, getKarachiTimestamp } from '@/utils/timezone';
+
+export { formatTime12, calculateEndTime, getKarachiTimestamp };
+
+export interface SlotSegment {
   startTime: string; // e.g. "17:00"
-  endTime: string;   // e.g. "18:00"
-  label: string;     // e.g. "05:00 PM - 06:00 PM"
+  endTime: string;   // e.g. "17:30"
+  label: string;     // e.g. "05:00 PM - 05:30 PM"
   isPeak: boolean;
   rate: number;
 }
+
+export type HourlySegment = SlotSegment;
 
 export interface PricingCalculationResult {
   courtId: string;
   courtName: string;
   courtType: 'double' | 'single';
   durationMinutes: number;
-  segments: HourlySegment[];
+  segments: SlotSegment[];
   totalAmount: number;
   advanceRequiredAmount: number;
   remainingAmount: number;
@@ -53,7 +62,7 @@ export function getHourlyRate(courtId: string, hour: number): { rate: number; is
   if (courtId === 'court-3') {
     return {
       rate: 2000,
-      isPeak: false, // Court 3 does not apply peak pricing
+      isPeak: false,
     };
   }
 
@@ -65,30 +74,40 @@ export function getHourlyRate(courtId: string, hour: number): { rate: number; is
 }
 
 /**
- * Formats a 24h hour (0-23) into human-readable 12h label (e.g., 6 -> "06:00 AM", 18 -> "06:00 PM")
+ * Returns the 30-minute slot rate for a specific court and starting hour/minute.
+ * - Court 3: PKR 1,000 per 30 minutes (PKR 2,000/hr) fixed all 24 hours.
+ * - Courts 1 & 2:
+ *   - Off-peak (06:00 to before 18:00): PKR 1,750 per 30 minutes (PKR 3,500/hr).
+ *   - Peak (18:00 to before 06:00): PKR 2,000 per 30 minutes (PKR 4,000/hr).
  */
-function formatHour12(hour: number): string {
-  const h24 = ((hour % 24) + 24) % 24;
-  const ampm = h24 >= 12 ? 'PM' : 'AM';
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  return `${String(h12).padStart(2, '0')}:00 ${ampm}`;
+export function getHalfHourRate(
+  courtId: string,
+  hourOrTime: number | string,
+  _minute: number = 0
+): { rate: number; isPeak: boolean } {
+  const hour = typeof hourOrTime === 'string' ? parseInt(hourOrTime.split(':')[0], 10) : hourOrTime;
+  const peak = isPeakHour(hour);
+
+  if (courtId === 'court-3') {
+    return {
+      rate: 1000,
+      isPeak: false,
+    };
+  }
+
+  return {
+    rate: peak ? 2000 : 1750,
+    isPeak: peak,
+  };
 }
 
 /**
- * Formats a 24h hour (0-23) into "HH:00" string
- */
-function formatHour24(hour: number): string {
-  const h24 = ((hour % 24) + 24) % 24;
-  return `${String(h24).padStart(2, '0')}:00`;
-}
-
-/**
- * Calculates exact pricing for an arbitrary list of (potentially non-consecutive) slots.
- * Each slot is computed using its own start hour and court rate.
+ * Calculates exact pricing for an arbitrary list of slots.
  */
 export function calculateMultipleSlotsPrice(
   courtId: string,
-  startTimes: string[]
+  startTimes: string[],
+  slotDurationMinutes: number = 30
 ): PricingCalculationResult {
   const courtName =
     courtId === 'court-1'
@@ -98,17 +117,23 @@ export function calculateMultipleSlotsPrice(
       : 'Court 3 — Single Court';
 
   const courtType = courtId === 'court-3' ? 'single' : 'double';
-  const durationMinutes = Math.max(60, startTimes.length * 60);
-  const segments: HourlySegment[] = [];
+  const segments: SlotSegment[] = [];
   let totalAmount = 0;
 
   for (const startTime of startTimes) {
-    const hour = parseInt(startTime.split(':')[0], 10);
-    const nextHour = (hour + 1) % 24;
-    const segmentStart = formatHour24(hour);
-    const segmentEnd = formatHour24(nextHour);
-    const label = `${formatHour12(hour)} - ${formatHour12(nextHour)}`;
-    const { rate, isPeak } = getHourlyRate(courtId, hour);
+    const [hour, minute] = startTime.split(':').map(Number);
+    const endMins = (hour * 60 + (minute || 0) + slotDurationMinutes) % 1440;
+    const nextHour = Math.floor(endMins / 60);
+    const nextMinute = endMins % 60;
+
+    const segmentStart = `${String(hour).padStart(2, '0')}:${String(minute || 0).padStart(2, '0')}`;
+    const segmentEnd = `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`;
+    const label = `${formatTime12(segmentStart)} - ${formatTime12(segmentEnd)}`;
+
+    const { rate, isPeak } =
+      slotDurationMinutes === 60
+        ? getHourlyRate(courtId, hour)
+        : getHalfHourRate(courtId, hour, minute || 0);
 
     segments.push({
       startTime: segmentStart,
@@ -121,6 +146,7 @@ export function calculateMultipleSlotsPrice(
     totalAmount += rate;
   }
 
+  const durationMinutes = Math.max(slotDurationMinutes, startTimes.length * slotDurationMinutes);
   const advanceRequiredAmount = 500; // Fixed PKR 500 advance deposit
   const remainingAmount = Math.max(0, totalAmount - advanceRequiredAmount);
 
@@ -137,32 +163,36 @@ export function calculateMultipleSlotsPrice(
 }
 
 /**
- * Calculates the exact pricing for a booking segment-by-segment.
- * For bookings crossing 6:00 PM or 6:00 AM, each hourly segment is
- * computed using its applicable rate.
+ * Calculates the exact pricing for a booking segment-by-segment in 30-minute increments.
+ * Automatically supports 60, 90, 120 minutes and cross-midnight boundaries.
  */
 export function calculateBookingPrice(
   courtId: string,
   startTime: string,
   durationMinutes: number = 60
 ): PricingCalculationResult {
-  const normalizedDuration = Math.max(60, Math.round(durationMinutes / 60) * 60);
-  const segmentCount = normalizedDuration / 60;
-  
-  const startHour = parseInt(startTime.split(':')[0], 10);
-  const segments: HourlySegment[] = [];
+  const normalizedDuration = Math.max(30, Math.round(durationMinutes / 30) * 30);
+  const segmentCount = normalizedDuration / 30;
+
+  const [startHour, startMin] = startTime.split(':').map(Number);
+  const segments: SlotSegment[] = [];
   let totalAmount = 0;
 
   for (let i = 0; i < segmentCount; i++) {
-    const currentHour = (startHour + i) % 24;
-    const nextHour = (currentHour + 1) % 24;
+    const curTotalMins = (startHour * 60 + (startMin || 0) + i * 30) % 1440;
+    const curHour = Math.floor(curTotalMins / 60);
+    const curMinute = curTotalMins % 60;
 
-    const segmentStart = formatHour24(currentHour);
-    const segmentEnd = formatHour24(nextHour);
-    const label = `${formatHour12(currentHour)} - ${formatHour12(nextHour)}`;
+    const nextTotalMins = (curTotalMins + 30) % 1440;
+    const nextHour = Math.floor(nextTotalMins / 60);
+    const nextMinute = nextTotalMins % 60;
 
-    const { rate, isPeak } = getHourlyRate(courtId, currentHour);
-    
+    const segmentStart = `${String(curHour).padStart(2, '0')}:${String(curMinute).padStart(2, '0')}`;
+    const segmentEnd = `${String(nextHour).padStart(2, '0')}:${String(nextMinute).padStart(2, '0')}`;
+    const label = `${formatTime12(segmentStart)} - ${formatTime12(segmentEnd)}`;
+
+    const { rate, isPeak } = getHalfHourRate(courtId, curHour, curMinute);
+
     segments.push({
       startTime: segmentStart,
       endTime: segmentEnd,
@@ -179,10 +209,10 @@ export function calculateBookingPrice(
 
   const courtName =
     courtId === 'court-1'
-      ? 'Court 1 - Double Court'
+      ? 'Court 1 — Double Court'
       : courtId === 'court-2'
-      ? 'Court 2 - Double Court'
-      : 'Court 3 - Single Court';
+      ? 'Court 2 — Double Court'
+      : 'Court 3 — Single Court';
 
   const courtType = courtId === 'court-3' ? 'single' : 'double';
 
@@ -196,14 +226,4 @@ export function calculateBookingPrice(
     advanceRequiredAmount,
     remainingAmount,
   };
-}
-
-/**
- * Calculates end time string (e.g. "18:00" + 120 mins -> "20:00")
- */
-export function calculateEndTime(startTime: string, durationMinutes: number): string {
-  const startHour = parseInt(startTime.split(':')[0], 10);
-  const durationHours = Math.max(1, Math.round(durationMinutes / 60));
-  const endHour = (startHour + durationHours) % 24;
-  return formatHour24(endHour);
 }

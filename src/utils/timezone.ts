@@ -120,3 +120,36 @@ export function formatKarachiDateTime(date: Date | string = new Date()): string 
     timeStyle: 'short',
   });
 }
+
+/**
+ * Returns epoch timestamp (ms) for a given date (YYYY-MM-DD) and time (HH:MM)
+ * strictly in Pakistan Standard Time (UTC+5).
+ */
+export function getKarachiTimestamp(dateStr: string, timeStr: string): number {
+  const [h, m] = timeStr.split(':').map(Number);
+  const iso = `${dateStr}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:00+05:00`;
+  return new Date(iso).getTime();
+}
+
+/**
+ * Formats a 24-hour "HH:MM" string into human-readable 12-hour format (e.g. "19:30" -> "07:30 PM", "00:00" -> "12:00 AM").
+ */
+export function formatTime12(timeStr: string): string {
+  const [h, m] = timeStr.split(':').map(Number);
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${String(h12).padStart(2, '0')}:${String(m).padStart(2, '0')} ${ampm}`;
+}
+
+/**
+ * Calculates end time string from a 24-hour startTime and durationMinutes (supports cross-midnight wrapping).
+ * e.g. ("19:00", 90) -> "20:30", ("23:30", 90) -> "01:00"
+ */
+export function calculateEndTime(startTime: string, durationMinutes: number): string {
+  const [sh, sm] = startTime.split(':').map(Number);
+  const totalMins = (sh * 60 + sm + durationMinutes) % 1440;
+  const eh = Math.floor(totalMins / 60);
+  const em = totalMins % 60;
+  return `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+}
+

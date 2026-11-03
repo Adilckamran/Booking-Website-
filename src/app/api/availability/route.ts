@@ -8,14 +8,17 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const courtId = searchParams.get('courtId') || 'court-1';
     const date = searchParams.get('date') || getKarachiDateString();
+    const durationParam = parseInt(searchParams.get('duration') || '60', 10);
+    const duration = [60, 90, 120].includes(durationParam) ? durationParam : 60;
 
-    const slots = await getSlotAvailability(courtId, date);
+    const slots = await getSlotAvailability(courtId, date, duration);
 
     return NextResponse.json(
       {
         success: true,
         courtId,
         date,
+        duration,
         slots,
         isDatabaseConnected: isSupabaseConfigured(),
       },

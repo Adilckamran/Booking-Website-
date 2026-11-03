@@ -15,6 +15,8 @@ export interface Court {
 
 export type SlotStatus = 'available' | 'held' | 'booked';
 
+export type BookingDuration = 60 | 90 | 120;
+
 export interface TimeSlot {
   id: string;
   startTime: string; // e.g. "17:00"

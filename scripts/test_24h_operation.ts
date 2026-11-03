@@ -38,9 +38,9 @@ async function runTests() {
   // TEST 1: OPERATING SLOTS DEFINITION INTEGRITY
   // --------------------------------------------------------------------------
   console.log('--- Test 1: Operating Slots Definition (24 Hours) ---');
-  assert(OPERATING_SLOTS_DEF.length === 24, `Exactly 24 hourly slots defined (got ${OPERATING_SLOTS_DEF.length})`);
-  assert(OPERATING_SLOTS_DEF[0].startTime === '00:00' && OPERATING_SLOTS_DEF[0].endTime === '01:00', 'First slot is 00:00 - 01:00 (12:00 AM - 01:00 AM)');
-  assert(OPERATING_SLOTS_DEF[23].startTime === '23:00' && OPERATING_SLOTS_DEF[23].endTime === '00:00', 'Final slot is 23:00 - 00:00 (11:00 PM - 12:00 AM)');
+  assert(OPERATING_SLOTS_DEF.length === 48, `Exactly 48 30-minute slots defined across 24h (got ${OPERATING_SLOTS_DEF.length})`);
+  assert(OPERATING_SLOTS_DEF[0].startTime === '00:00' && OPERATING_SLOTS_DEF[0].endTime === '00:30', 'First slot is 00:00 - 00:30 (12:00 AM - 12:30 AM)');
+  assert(OPERATING_SLOTS_DEF[47].startTime === '23:30' && OPERATING_SLOTS_DEF[47].endTime === '00:00', 'Final slot is 23:30 - 00:00 (11:30 PM - 12:00 AM)');
 
   // Verify missing early-morning slots 2:00 AM - 6:00 AM exist
   const earlyMorningSlots = ['02:00', '03:00', '04:00', '05:00'];
@@ -193,7 +193,12 @@ async function runTests() {
   });
   assert(conflictRes.success === false, 'Duplicate booking for 02:00 slot is rejected');
   if (!conflictRes.success) {
-    assert(conflictRes.error.toLowerCase().includes('already reserved') || conflictRes.error.toLowerCase().includes('booked'), `Returns conflict error message (got: "${conflictRes.error}")`);
+    assert(
+      conflictRes.error.toLowerCase().includes('already reserved') ||
+      conflictRes.error.toLowerCase().includes('booked') ||
+      conflictRes.error.toLowerCase().includes('conflicts'),
+      `Returns conflict error message (got: "${conflictRes.error}")`
+    );
   }
 
   // --------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { Court, Booking, TimeSlot } from '@/types';
-import { getHourlyRate } from '@/services/pricing/pricingService';
+import { getHalfHourRate, formatTime12 } from '@/services/pricing/pricingService';
 
 export const DEMO_COURTS: Court[] = [
   {
@@ -41,37 +41,33 @@ export const DEMO_COURTS: Court[] = [
 ];
 
 /**
- * Standard 24-hour operating schedule slots (00:00 to 24:00)
+ * Standard 24-hour operating schedule slots (00:00 to 24:00) with 30-minute intervals
  * Peak hours: 6:00 PM to before 6:00 AM (18:00 - 06:00)
  * Off-peak hours: 6:00 AM to before 6:00 PM (06:00 - 18:00)
- * The final hourly slot each day is 11:00 PM - 12:00 AM (23:00 - 00:00).
+ * Exactly 48 30-minute intervals per 24-hour day.
  */
-export const OPERATING_SLOTS_DEF = [
-  { startTime: '00:00', endTime: '01:00', label: '12:00 AM - 01:00 AM', isPeak: true },
-  { startTime: '01:00', endTime: '02:00', label: '01:00 AM - 02:00 AM', isPeak: true },
-  { startTime: '02:00', endTime: '03:00', label: '02:00 AM - 03:00 AM', isPeak: true },
-  { startTime: '03:00', endTime: '04:00', label: '03:00 AM - 04:00 AM', isPeak: true },
-  { startTime: '04:00', endTime: '05:00', label: '04:00 AM - 05:00 AM', isPeak: true },
-  { startTime: '05:00', endTime: '06:00', label: '05:00 AM - 06:00 AM', isPeak: true },
-  { startTime: '06:00', endTime: '07:00', label: '06:00 AM - 07:00 AM', isPeak: false },
-  { startTime: '07:00', endTime: '08:00', label: '07:00 AM - 08:00 AM', isPeak: false },
-  { startTime: '08:00', endTime: '09:00', label: '08:00 AM - 09:00 AM', isPeak: false },
-  { startTime: '09:00', endTime: '10:00', label: '09:00 AM - 10:00 AM', isPeak: false },
-  { startTime: '10:00', endTime: '11:00', label: '10:00 AM - 11:00 AM', isPeak: false },
-  { startTime: '11:00', endTime: '12:00', label: '11:00 AM - 12:00 PM', isPeak: false },
-  { startTime: '12:00', endTime: '13:00', label: '12:00 PM - 01:00 PM', isPeak: false },
-  { startTime: '13:00', endTime: '14:00', label: '01:00 PM - 02:00 PM', isPeak: false },
-  { startTime: '14:00', endTime: '15:00', label: '02:00 PM - 03:00 PM', isPeak: false },
-  { startTime: '15:00', endTime: '16:00', label: '03:00 PM - 04:00 PM', isPeak: false },
-  { startTime: '16:00', endTime: '17:00', label: '04:00 PM - 05:00 PM', isPeak: false },
-  { startTime: '17:00', endTime: '18:00', label: '05:00 PM - 06:00 PM', isPeak: false },
-  { startTime: '18:00', endTime: '19:00', label: '06:00 PM - 07:00 PM', isPeak: true },
-  { startTime: '19:00', endTime: '20:00', label: '07:00 PM - 08:00 PM', isPeak: true },
-  { startTime: '20:00', endTime: '21:00', label: '08:00 PM - 09:00 PM', isPeak: true },
-  { startTime: '21:00', endTime: '22:00', label: '09:00 PM - 10:00 PM', isPeak: true },
-  { startTime: '22:00', endTime: '23:00', label: '10:00 PM - 11:00 PM', isPeak: true },
-  { startTime: '23:00', endTime: '00:00', label: '11:00 PM - 12:00 AM', isPeak: true },
-];
+export interface OperatingSlotDef {
+  startTime: string;
+  endTime: string;
+  label: string;
+  isPeak: boolean;
+}
+
+export const OPERATING_SLOTS_DEF: OperatingSlotDef[] = Array.from({ length: 48 }, (_, i) => {
+  const startTotalMins = i * 30;
+  const sh = Math.floor(startTotalMins / 60);
+  const sm = startTotalMins % 60;
+  const endTotalMins = (startTotalMins + 30) % 1440;
+  const eh = Math.floor(endTotalMins / 60);
+  const em = endTotalMins % 60;
+
+  const startTime = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+  const endTime = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+  const isPeak = sh >= 18 || sh < 6;
+  const label = `${formatTime12(startTime)} - ${formatTime12(endTime)}`;
+
+  return { startTime, endTime, label, isPeak };
+});
 
 /**
  * Generate simulated slots for demo interaction
@@ -81,16 +77,17 @@ export function getDemoSlotsForCourt(courtId: string, date: string): TimeSlot[] 
 
   return OPERATING_SLOTS_DEF.map((def, idx) => {
     let status: TimeSlot['status'] = 'available';
-    if (idx === 12 || idx === 13) {
+    if (idx === 24 || idx === 25) {
       status = 'booked';
-    } else if (idx === 14) {
+    } else if (idx === 26) {
       status = 'held';
-    } else if (idx === 15 && courtId === 'court-1') {
+    } else if (idx === 36 && courtId === 'court-1') {
       status = 'booked';
     }
 
     const hour = parseInt(def.startTime.split(':')[0], 10);
-    const { rate, isPeak } = getHourlyRate(court.id, hour);
+    const minute = parseInt(def.startTime.split(':')[1], 10);
+    const { rate, isPeak } = getHalfHourRate(court.id, hour, minute);
 
     return {
       id: `${courtId}-${date}-${def.startTime}`,

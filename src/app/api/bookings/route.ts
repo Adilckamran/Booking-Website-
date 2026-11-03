@@ -161,59 +161,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Match duration validation (strictly 60, 120, or 180 minutes)
-    if (![60, 120, 180].includes(durationMinutes)) {
+    // Match duration validation (strictly 60, 90, or 120 minutes)
+    if (![60, 90, 120].includes(durationMinutes)) {
       return NextResponse.json(
-        { success: false, error: 'Invalid match duration. Permitted durations are 60, 120, or 180 minutes.' },
+        { success: false, error: 'Invalid match duration. Permitted durations are strictly 60, 90, or 120 minutes.' },
         { status: 400 }
       );
     }
 
     const parsedDuration = durationMinutes;
-    const requiredSlotCount = durationMinutes / 60;
+    const primaryStartTime = startTime || (parsedSlots.length > 0 ? parsedSlots[0] : '');
 
-    // Check slot count matches required duration
-    if (parsedSlots.length !== requiredSlotCount) {
+    // Validate 30-minute start time format (HH:00 or HH:30 across 24h)
+    if (!primaryStartTime || !/^([01][0-9]|2[0-3]):(00|30)$/.test(primaryStartTime)) {
       return NextResponse.json(
-        {
-          success: false,
-          error: `For a ${parsedDuration}-minute match, please select exactly ${requiredSlotCount} one-hour time slot${
-            requiredSlotCount > 1 ? 's' : ''
-          }. Currently ${parsedSlots.length} slot${parsedSlots.length === 1 ? '' : 's'} selected.`,
-        },
+        { success: false, error: `Invalid start time: ${primaryStartTime}. Must be in 30-minute intervals (e.g. 19:00, 19:30).` },
         { status: 400 }
       );
     }
-
-    // Operating hours boundary validation (24 Hours: 00:00 to 24:00)
-    const validOperatingHours = [
-      '00:00', '01:00', '02:00', '03:00', '04:00', '05:00',
-      '06:00', '07:00', '08:00', '09:00', '10:00', '11:00',
-      '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
-      '18:00', '19:00', '20:00', '21:00', '22:00', '23:00'
-    ];
-
-    for (const slotTime of parsedSlots) {
-      if (!validOperatingHours.includes(slotTime)) {
-        return NextResponse.json(
-          { success: false, error: `Time slot ${slotTime} is outside club operating hours (00:00 - 24:00).` },
-          { status: 400 }
-        );
-      }
-    }
-
-    // Double check uniqueness of selected slots
-    const uniqueSlots = Array.from(new Set(parsedSlots));
-    if (uniqueSlots.length !== parsedSlots.length) {
-      return NextResponse.json(
-        { success: false, error: 'Duplicate time slots selected. Please choose distinct time slots.' },
-        { status: 400 }
-      );
-    }
-
-    // Sort slots chronologically
-    parsedSlots.sort();
-    const primaryStartTime = parsedSlots[0];
 
     if (!customerName || !customerName.trim() || customerName.trim().length < 3) {
       return NextResponse.json(

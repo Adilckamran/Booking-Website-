@@ -9,6 +9,7 @@ import { StatusBadge } from '@/components/common/StatusBadge';
 import { PaymentAccountsCard } from '@/components/common/PaymentAccountsCard';
 import { validateReceiptFile, RECEIPT_STORAGE_CONFIG } from '@/services/storage/receiptStorage';
 import { Booking, BookingStatus, PaymentMethod } from '@/types';
+import { getKarachiTimestamp } from '@/utils/timezone';
 import {
   Search,
   CheckCircle2,
@@ -96,6 +97,230 @@ function getBookingFromParams(
   }
 
   return INITIAL_DEMO_BOOKINGS[0];
+}
+
+function BookingCountdownCard({ booking, isMounted }: { booking: Booking; isMounted: boolean }) {
+  const [nowMs, setNowMs] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    setNowMs(Date.now());
+    const interval = setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isMounted]);
+
+  const courtName = booking.courtName;
+  const startTime = booking.startTime;
+  const endTime = booking.endTime;
+  const duration = booking.durationMinutes || 60;
+
+  // Unapproved bookings: show explicit status notice without countdown
+  if (booking.status !== 'confirmed') {
+    let title = 'AWAITING ADMIN APPROVAL';
+    let subtitle = 'Your booking is awaiting verification by club management.';
+    let badgeColor = 'bg-blue-100 text-blue-800 border-blue-200';
+    let icon = <Info className="w-5 h-5 text-blue-600 shrink-0" />;
+
+    if (booking.status === 'awaiting_payment') {
+      title = 'AWAITING ADVANCE PAYMENT';
+      subtitle = `Advance deposit of PKR ${booking.advanceRequiredAmount.toLocaleString()} required to hold your slot.`;
+      badgeColor = 'bg-amber-100 text-amber-800 border-amber-200';
+      icon = <Clock className="w-5 h-5 text-amber-600 shrink-0" />;
+    } else if (booking.status === 'rejected') {
+      title = 'RESERVATION REJECTED';
+      subtitle = 'This reservation was rejected and the slot has been released.';
+      badgeColor = 'bg-rose-100 text-rose-800 border-rose-200';
+      icon = <XCircle className="w-5 h-5 text-rose-600 shrink-0" />;
+    } else if (booking.status === 'cancelled' || booking.status === 'expired') {
+      title = 'BOOKING EXPIRED';
+      subtitle = 'This reservation was not completed within the time limit.';
+      badgeColor = 'bg-slate-100 text-slate-800 border-slate-200';
+      icon = <AlertTriangle className="w-5 h-5 text-slate-600 shrink-0" />;
+    }
+
+    return (
+      <div className="mt-6 p-5 rounded-2xl bg-slate-900 text-white shadow-md border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center">
+              {icon}
+            </div>
+            <div>
+              <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded border inline-block ${badgeColor}`}>
+                {title}
+              </span>
+              <p className="text-xs text-slate-300 mt-1">{subtitle}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs font-mono text-slate-300 bg-slate-800/80 px-3.5 py-2 rounded-xl border border-slate-700">
+            <div>
+              <span className="text-[10px] uppercase text-slate-400 block font-sans">Court</span>
+              <span className="font-bold text-white">{courtName}</span>
+            </div>
+            <div className="border-l border-slate-700 pl-3">
+              <span className="text-[10px] uppercase text-slate-400 block font-sans">Session</span>
+              <span className="font-bold text-white">{startTime} - {endTime} ({duration}m)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Hydration fallback before client mount
+  if (!isMounted || nowMs === null) {
+    return (
+      <div className="mt-6 p-5 rounded-2xl bg-[#0A2540] text-white shadow-md border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-wider text-orange-400 block">
+              Match Session Schedule
+            </span>
+            <h3 className="text-base font-bold text-white mt-0.5">
+              {courtName} • {startTime} - {endTime} ({duration} mins)
+            </h3>
+          </div>
+          <div className="text-right">
+            <span className="text-[10px] font-mono uppercase text-slate-400 block">Live Match Countdown</span>
+            <div className="text-xl font-mono font-black text-white">00:00:00</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Confirmed booking: calculate countdown against Pakistan Standard Time
+  const startMs = getKarachiTimestamp(booking.date, booking.startTime);
+  const endMs = startMs + duration * 60 * 1000;
+
+  if (nowMs < startMs) {
+    // Before session starts
+    const diff = startMs - nowMs;
+    const totalSecs = Math.floor(diff / 1000);
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    const formatted = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    return (
+      <div className="mt-6 p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-[#0A2540] to-slate-900 text-white shadow-lg border border-slate-700">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-extrabold uppercase tracking-wider">
+                <Check className="w-3 h-3 stroke-[3]" />
+                Confirmed Reservation
+              </span>
+              <span className="text-xs text-slate-300">•</span>
+              <span className="text-xs font-semibold text-slate-300">{courtName}</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-white">
+              {booking.date} • {startTime} to {endTime} ({duration} Minutes)
+            </h3>
+            <p className="text-xs text-slate-400">
+              Please arrive at the arena 10 minutes before your scheduled start time.
+            </p>
+          </div>
+
+          <div className="bg-slate-800/90 border border-slate-700 rounded-xl px-5 py-3 text-center md:text-right shrink-0">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-orange-400 flex items-center justify-center md:justify-end gap-1.5">
+              <Clock className="w-3.5 h-3.5 animate-pulse text-orange-400" />
+              YOUR BOOKING STARTS IN:
+            </span>
+            <div className="text-3xl sm:text-4xl font-mono font-black text-white tracking-widest mt-0.5">
+              {formatted}
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+              HH : MM : SS
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  } else if (nowMs >= startMs && nowMs < endMs) {
+    // During session
+    const diff = endMs - nowMs;
+    const totalSecs = Math.floor(diff / 1000);
+    const hours = Math.floor(totalSecs / 3600);
+    const mins = Math.floor((totalSecs % 3600) / 60);
+    const secs = totalSecs % 60;
+    const formatted = `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+
+    return (
+      <div className="mt-6 p-5 sm:p-6 rounded-2xl bg-gradient-to-r from-emerald-950 via-slate-900 to-[#0A2540] text-white shadow-lg border border-emerald-500/40 ring-2 ring-emerald-500/20">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500 text-white text-[10px] font-extrabold uppercase tracking-wider animate-pulse">
+                <span className="w-2 h-2 rounded-full bg-white" />
+                Live on Court
+              </span>
+              <span className="text-xs text-slate-300">•</span>
+              <span className="text-xs font-semibold text-emerald-300">{courtName}</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-white">
+              {booking.date} • {startTime} to {endTime} ({duration} Minutes)
+            </h3>
+            <p className="text-xs text-emerald-200/80">
+              Your match is currently in progress. Enjoy your session at Power Padel Arena!
+            </p>
+          </div>
+
+          <div className="bg-slate-800/90 border border-emerald-500/30 rounded-xl px-5 py-3 text-center md:text-right shrink-0">
+            <span className="text-[11px] font-extrabold uppercase tracking-wider text-emerald-400 flex items-center justify-center md:justify-end gap-1.5">
+              <Clock className="w-3.5 h-3.5 text-emerald-400" />
+              MATCH IN PROGRESS • TIME REMAINING:
+            </span>
+            <div className="text-3xl sm:text-4xl font-mono font-black text-emerald-400 tracking-widest mt-0.5">
+              {formatted}
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 uppercase tracking-widest">
+              HH : MM : SS
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  } else {
+    // Session completed
+    return (
+      <div className="mt-6 p-5 rounded-2xl bg-slate-900 text-white shadow-md border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-slate-700 text-slate-200 text-[10px] font-extrabold uppercase tracking-wider">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                Match Concluded
+              </span>
+              <span className="text-xs text-slate-400">•</span>
+              <span className="text-xs font-semibold text-slate-300">{courtName}</span>
+            </div>
+            <h3 className="text-sm sm:text-base font-bold text-slate-200">
+              {booking.date} • {startTime} to {endTime} ({duration} Minutes)
+            </h3>
+            <p className="text-xs text-slate-400">
+              Thank you for playing at Power Padel Arena. We hope you had a great match!
+            </p>
+          </div>
+
+          <div className="bg-slate-800 px-4 py-2.5 rounded-xl border border-slate-700 text-center sm:text-right shrink-0">
+            <span className="text-xs font-extrabold uppercase tracking-wider text-slate-300 block">
+              BOOKING COMPLETED
+            </span>
+            <Link
+              href="/book"
+              className="mt-1.5 inline-flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 font-semibold"
+            >
+              <span>Book your next match</span>
+              <ArrowRight className="w-3 h-3" />
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 }
 
 function StatusAndPaymentContent() {
@@ -423,6 +648,9 @@ function StatusAndPaymentContent() {
                   <span className="font-bold text-slate-900 mt-0.5 block">PKR {activeBooking.remainingAmount.toLocaleString('en-US')}</span>
                 </div>
               </div>
+
+              {/* LIVE SESSION COUNTDOWN WIDGET */}
+              <BookingCountdownCard booking={activeBooking} isMounted={isMounted} />
 
               {/* STATUS SPECIFIC ALERTS */}
               {activeBooking.status === 'awaiting_payment' && (

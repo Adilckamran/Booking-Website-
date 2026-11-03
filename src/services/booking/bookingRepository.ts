@@ -12,6 +12,7 @@ import {
   getHourlyRate,
   calculateMultipleSlotsPrice,
 } from '@/services/pricing/pricingService';
+import { getKarachiTimestamp, formatTime12, getKarachiDateString } from '@/utils/timezone';
 import {
   sendBookingConfirmationEmail,
   sendBookingRejectionEmail,
@@ -37,7 +38,7 @@ export function getOperatingScheduleMinutes(timeStr: string): number {
  * Resolves primary startTime, endTime, and continuity for requested slots.
  * Prevents non-consecutive multi-hour selections from falsely appearing as continuous blocks.
  */
-export function resolveBookingTiming(requestedSlots: string[]): {
+export function resolveBookingTiming(requestedSlots: string[], slotDurationMinutes?: number): {
   primaryStartTime: string;
   primaryEndTime: string;
   isConsecutive: boolean;
@@ -48,12 +49,21 @@ export function resolveBookingTiming(requestedSlots: string[]): {
   const lastStart = sorted[sorted.length - 1];
   const firstMin = getOperatingScheduleMinutes(firstStart);
   const lastMin = getOperatingScheduleMinutes(lastStart);
-  const isConsecutive = (lastMin - firstMin) === (sorted.length - 1) * 60;
+  
+  let step = slotDurationMinutes;
+  if (!step) {
+    if (sorted.length > 1) {
+      const diff = getOperatingScheduleMinutes(sorted[1]) - getOperatingScheduleMinutes(sorted[0]);
+      step = diff > 0 ? diff : 30;
+    } else {
+      step = 30;
+    }
+  }
 
-  const firstHour = parseInt(firstStart.split(':')[0], 10);
-  const firstEndTime = `${String((firstHour + 1) % 24).padStart(2, '0')}:00`;
-  const lastHour = parseInt(lastStart.split(':')[0], 10);
-  const lastEndTime = `${String((lastHour + 1) % 24).padStart(2, '0')}:00`;
+  const isConsecutive = (lastMin - firstMin) === (sorted.length - 1) * step;
+
+  const firstEndTime = calculateEndTime(firstStart, step);
+  const lastEndTime = calculateEndTime(lastStart, step);
 
   return {
     primaryStartTime: firstStart,
@@ -64,50 +74,95 @@ export function resolveBookingTiming(requestedSlots: string[]): {
 }
 
 /**
- * Slot index lookup in OPERATING_SLOTS_DEF
+ * Checks whether two epoch time ranges overlap: [start1, end1) and [start2, end2)
+ * Half-open interval intersection strictly requires: start1 < end2 AND end1 > start2.
  */
-function getSlotIndex(timeStr: string): number {
-  return OPERATING_SLOTS_DEF.findIndex((s) => s.startTime === timeStr);
+export function intervalsOverlap(
+  start1Ms: number,
+  end1Ms: number,
+  start2Ms: number,
+  end2Ms: number
+): boolean {
+  return start1Ms < end2Ms && end1Ms > start2Ms;
 }
 
 /**
- * Checks whether two time intervals overlap within the operating schedule.
- * [S1, S1 + D1) and [S2, S2 + D2)
+ * Checks whether a booking record (or any of its child slots) conflicts with a given time interval.
+ * Works seamlessly across midnight boundaries and arbitrary durations (60, 90, 120 mins).
  */
-function slotsOverlap(
-  start1: string,
-  duration1: number,
-  start2: string,
-  duration2: number
+export function bookingConflictsWithInterval(
+  b: {
+    date: string;
+    startTime?: string;
+    start_time?: string;
+    endTime?: string;
+    end_time?: string;
+    durationMinutes?: number;
+    duration_minutes?: number;
+    slots?: unknown;
+  },
+  candStartMs: number,
+  candEndMs: number
 ): boolean {
-  const idx1 = getSlotIndex(start1);
-  const idx2 = getSlotIndex(start2);
-  if (idx1 === -1 || idx2 === -1) {
-    return start1 === start2;
-  }
-  const len1 = Math.max(1, Math.round((duration1 || 60) / 60));
-  const len2 = Math.max(1, Math.round((duration2 || 60) / 60));
-  return Math.max(idx1, idx2) < Math.min(idx1 + len1, idx2 + len2);
-}
+  const bDate = b.date;
+  if (!bDate) return false;
 
-/**
- * Checks if a booking occupies a specific slot (supports multi-slot JSON or start_time/duration)
- */
-function bookingOccupiesSlot(
-  b: { startTime?: string; start_time?: string; durationMinutes?: number; duration_minutes?: number; slots?: unknown },
-  targetStartTime: string
-): boolean {
-  const slotsArr = b.slots;
-  if (Array.isArray(slotsArr) && slotsArr.length > 0) {
-    return slotsArr.some((s: unknown) => {
-      const sTime = typeof s === 'string' ? s : typeof s === 'object' && s !== null && 'startTime' in s ? String((s as { startTime: unknown }).startTime) : '';
-      return sTime === targetStartTime;
+  // 1. If granular slots array exists
+  if (Array.isArray(b.slots) && b.slots.length > 0) {
+    return b.slots.some((s: unknown) => {
+      let st = '';
+      let et = '';
+      if (typeof s === 'string') {
+        st = s;
+      } else if (typeof s === 'object' && s !== null) {
+        st = String((s as { startTime?: unknown; start_time?: unknown }).startTime || (s as { start_time?: unknown }).start_time || '');
+        et = String((s as { endTime?: unknown; end_time?: unknown }).endTime || (s as { end_time?: unknown }).end_time || '');
+      }
+      if (!st) return false;
+      const slotStartMs = getKarachiTimestamp(bDate, st);
+      let slotEndMs: number;
+      if (et) {
+        const sh = parseInt(st.split(':')[0], 10);
+        const eh = parseInt(et.split(':')[0], 10);
+        if (eh < sh || (eh === 0 && sh === 23)) {
+          // Cross-midnight
+          const nextDayMs = slotStartMs + 24 * 60 * 60 * 1000;
+          const nextDateStr = new Date(nextDayMs).toISOString().split('T')[0];
+          slotEndMs = getKarachiTimestamp(nextDateStr, et);
+        } else {
+          slotEndMs = getKarachiTimestamp(bDate, et);
+        }
+      } else {
+        slotEndMs = slotStartMs + 30 * 60 * 1000;
+      }
+      return intervalsOverlap(slotStartMs, slotEndMs, candStartMs, candEndMs);
     });
   }
-  const st = b.startTime || b.start_time || '';
+
+  // 2. Single interval from primary startTime and duration
+  const st = b.startTime || b.start_time;
+  if (!st) return false;
   const dur = b.durationMinutes || b.duration_minutes || 60;
-  return slotsOverlap(st, dur, targetStartTime, 60);
+  const bStartMs = getKarachiTimestamp(bDate, st);
+  const bEndMs = bStartMs + dur * 60 * 1000;
+
+  return intervalsOverlap(bStartMs, bEndMs, candStartMs, candEndMs);
 }
+
+/**
+ * Backward compatibility wrapper for single slot check
+ */
+export function bookingOccupiesSlot(
+  b: { date?: string; startTime?: string; start_time?: string; durationMinutes?: number; duration_minutes?: number; slots?: unknown },
+  targetStartTime: string,
+  targetDate?: string
+): boolean {
+  const d = b.date || targetDate || getKarachiDateString();
+  const candStartMs = getKarachiTimestamp(d, targetStartTime);
+  const candEndMs = candStartMs + 30 * 60 * 1000;
+  return bookingConflictsWithInterval({ ...b, date: d }, candStartMs, candEndMs);
+}
+
 
 /**
  * Server-Side In-Memory Authoritative Booking & Notification Store
@@ -131,13 +186,14 @@ class ServerBookingStore {
     },
   ];
 
-  // 1. Get availability for a court & date
-  public getAvailability(courtId: string, date: string): TimeSlot[] {
+  // 1. Get availability for a court & date (with duration-based overlap resolution)
+  public getAvailability(courtId: string, date: string, durationMinutes: number = 60): TimeSlot[] {
     const court = DEMO_COURTS.find((c) => c.id === courtId) || DEMO_COURTS[0];
+    const dur = [60, 90, 120].includes(durationMinutes) ? durationMinutes : 60;
 
     const now = Date.now();
     const activeBookings = this.bookings.filter((b) => {
-      if (b.courtId !== courtId || b.date !== date) return false;
+      if (b.courtId !== courtId) return false;
       if (b.status === 'rejected' || b.status === 'cancelled' || b.status === 'expired') return false;
       if (b.status === 'confirmed' || b.status === 'payment_under_review') return true;
       if (b.status === 'awaiting_payment') {
@@ -148,7 +204,9 @@ class ServerBookingStore {
     });
 
     return OPERATING_SLOTS_DEF.map((def) => {
-      const activeMatch = activeBookings.find((b) => bookingOccupiesSlot(b, def.startTime));
+      const candStartMs = getKarachiTimestamp(date, def.startTime);
+      const candEndMs = candStartMs + dur * 60 * 1000;
+      const activeMatch = activeBookings.find((b) => bookingConflictsWithInterval(b, candStartMs, candEndMs));
 
       let status: TimeSlot['status'] = 'available';
       let heldUntil: string | undefined = undefined;
@@ -162,23 +220,24 @@ class ServerBookingStore {
         }
       }
 
-      const hour = parseInt(def.startTime.split(':')[0], 10);
-      const { rate, isPeak } = getHourlyRate(court.id, hour);
+      const endTime = calculateEndTime(def.startTime, dur);
+      const label = `${formatTime12(def.startTime)} - ${formatTime12(endTime)}`;
+      const pricing = calculateBookingPrice(court.id, def.startTime, dur);
 
       return {
         id: `${courtId}-${date}-${def.startTime}`,
         startTime: def.startTime,
-        endTime: def.endTime,
-        label: def.label,
-        isPeak,
-        price: rate,
+        endTime,
+        label,
+        isPeak: def.isPeak,
+        price: pricing.totalAmount,
         status,
         heldUntil,
       };
     });
   }
 
-  // 2. Create pending booking (with atomic server double-booking check)
+  // 2. Create pending booking (with atomic interval double-booking check)
   public createPendingBooking(params: {
     courtId: string;
     date: string;
@@ -192,55 +251,53 @@ class ServerBookingStore {
     transactionRef?: string;
     receiptScreenshotUrl?: string;
     referenceNumber?: string;
-  }): { success: true; booking: Booking } | { success: false; error: string } {
+  }): { success: true; booking: Booking } | { success: false; error: string; isConflict?: boolean } {
     const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
+    const durationMinutes = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
+      ? params.durationMinutes
+      : 60;
 
-    // Determine requested slots list
-    const requestedSlots: string[] =
-      params.slots && params.slots.length > 0
-        ? [...params.slots]
-        : params.startTime
-        ? [params.startTime]
-        : [];
+    let startTime = params.startTime;
+    if (!startTime && params.slots && params.slots.length > 0) {
+      startTime = params.slots[0];
+    }
 
-    if (requestedSlots.length === 0) {
+    if (!startTime) {
       return { success: false, error: 'No time slot specified.' };
     }
 
-    // Verify all requested slots are valid operating hours
-    for (const sTime of requestedSlots) {
-      const valid = OPERATING_SLOTS_DEF.some((s) => s.startTime === sTime);
-      if (!valid) {
-        return { success: false, error: `Invalid time slot: ${sTime}` };
-      }
+    if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
+      return { success: false, error: `Invalid slot time format: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
     }
 
-    // SERVER-SIDE DOUBLE BOOKING PREVENTION:
-    // Check if any active booking conflicts with any of the requested slots
+    const candStartMs = getKarachiTimestamp(params.date, startTime);
+    const candEndMs = candStartMs + durationMinutes * 60 * 1000;
     const now = Date.now();
+
+    // SERVER-SIDE DOUBLE BOOKING PREVENTION:
+    // Check if any active booking conflicts with the requested interval [candStartMs, candEndMs)
     const existingConflict = this.bookings.find((b) => {
-      if (b.courtId !== params.courtId || b.date !== params.date) return false;
+      if (b.courtId !== params.courtId) return false;
       if (b.status === 'rejected' || b.status === 'cancelled' || b.status === 'expired') return false;
       if (b.status === 'awaiting_payment') {
         const isExpired = new Date(b.createdAt).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 <= now;
         if (isExpired) return false;
       }
-      return requestedSlots.some((reqSlot) => bookingOccupiesSlot(b, reqSlot));
+      return bookingConflictsWithInterval(b, candStartMs, candEndMs);
     });
 
     if (existingConflict) {
       return {
         success: false,
-        error: `One or more selected slots on ${params.date} are already reserved by another customer (${existingConflict.status === 'confirmed' ? 'Confirmed' : 'Held Under Review'}).`,
+        isConflict: true,
+        error: `The requested time slot on ${params.date} (${startTime} for ${durationMinutes} mins) conflicts with an existing reservation (${existingConflict.status === 'confirmed' ? 'Confirmed' : 'Held Under Review'}).`,
       };
     }
 
-    // Calculate dynamic pricing across all slots
-    const pricing = calculateMultipleSlotsPrice(court.id, requestedSlots);
-    const timing = resolveBookingTiming(requestedSlots);
-    const primaryStartTime = timing.primaryStartTime;
-    const primaryEndTime = timing.primaryEndTime;
-    const durationMinutes = requestedSlots.length * 60;
+    // Calculate dynamic pricing across duration
+    const pricing = calculateBookingPrice(court.id, startTime, durationMinutes);
+    const primaryStartTime = startTime;
+    const primaryEndTime = calculateEndTime(startTime, durationMinutes);
 
     const bookingSlots: BookingSlotItem[] = pricing.segments.map((seg) => ({
       startTime: seg.startTime,
@@ -383,13 +440,15 @@ class ServerBookingStore {
     const booking = this.bookings[bookingIndex];
 
     // Re-check conflict to prevent double booking
+    const bStartMs = getKarachiTimestamp(booking.date, booking.startTime);
+    const bEndMs = bStartMs + (booking.durationMinutes || 60) * 60 * 1000;
+
     const conflictingConfirmed = this.bookings.find(
       (b) =>
         b.courtId === booking.courtId &&
-        b.date === booking.date &&
         b.status === 'confirmed' &&
         b.referenceNumber !== booking.referenceNumber &&
-        slotsOverlap(b.startTime, b.durationMinutes || 60, booking.startTime, booking.durationMinutes || 60)
+        bookingConflictsWithInterval(b, bStartMs, bEndMs)
     );
 
     if (conflictingConfirmed) {
@@ -486,18 +545,22 @@ class ServerBookingStore {
     adminEmail: string;
   }): { success: true; booking: Booking } | { success: false; error: string } {
     const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
-    const duration = params.durationMinutes || 60;
+    const duration = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
+      ? params.durationMinutes
+      : 60;
+    const candStartMs = getKarachiTimestamp(params.date, params.startTime);
+    const candEndMs = candStartMs + duration * 60 * 1000;
     const now = Date.now();
 
     // Check for overlap against active bookings (ignoring rejected, cancelled, and expired holds)
     const existingConflict = this.bookings.find((b) => {
-      if (b.courtId !== params.courtId || b.date !== params.date) return false;
+      if (b.courtId !== params.courtId) return false;
       if (b.status === 'rejected' || b.status === 'cancelled' || b.status === 'expired') return false;
       if (b.status === 'awaiting_payment') {
         const isExpired = new Date(b.createdAt).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 <= now;
         if (isExpired) return false;
       }
-      return slotsOverlap(b.startTime, b.durationMinutes || 60, params.startTime, duration);
+      return bookingConflictsWithInterval(b, candStartMs, candEndMs);
     });
 
     if (existingConflict) {
@@ -507,11 +570,19 @@ class ServerBookingStore {
       };
     }
 
-    const { totalAmount, advanceRequiredAmount, remainingAmount } = calculateBookingPrice(
+    const { totalAmount, advanceRequiredAmount, remainingAmount, segments } = calculateBookingPrice(
       court.id,
       params.startTime,
       duration
     );
+
+    const bookingSlots: BookingSlotItem[] = segments.map((seg) => ({
+      startTime: seg.startTime,
+      endTime: seg.endTime,
+      label: seg.label,
+      price: seg.rate,
+      isPeak: seg.isPeak,
+    }));
 
     const ref = `PPA-PK-2026-${Math.floor(1000 + Math.random() * 9000)}`;
     const newBooking: Booking = {
@@ -532,6 +603,7 @@ class ServerBookingStore {
       customerEmail: params.customerEmail?.trim(),
       paymentMethod: params.paymentMethod || 'cash_at_venue',
       transactionRef: params.isPaid ? 'CASH-COUNTER-DESK' : undefined,
+      slots: bookingSlots,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       isDemo: true,
@@ -585,8 +657,13 @@ if (process.env.NODE_ENV !== 'production') globalForStore.serverBookingStore = s
 // PUBLIC EXPORTED REPOSITORY INTERFACE (Dual-mode: Supabase OR Server Memory Store)
 // ==============================================================================
 
-export async function getSlotAvailability(courtId: string, date: string): Promise<TimeSlot[]> {
+export async function getSlotAvailability(
+  courtId: string,
+  date: string,
+  durationMinutes: number = 60
+): Promise<TimeSlot[]> {
   const court = DEMO_COURTS.find((c) => c.id === courtId) || DEMO_COURTS[0];
+  const dur = [60, 90, 120].includes(durationMinutes) ? durationMinutes : 60;
 
   if (isSupabaseConfigured()) {
     const adminClient = getSupabaseAdminClient();
@@ -601,39 +678,20 @@ export async function getSlotAvailability(courtId: string, date: string): Promis
             .from('bookings')
             .update({ status: 'expired', updated_at: nowIso })
             .eq('court_id', courtId)
-            .eq('date', date)
             .eq('status', 'awaiting_payment')
             .or(`held_until.lte.${nowIso},and(held_until.is.null,created_at.lte.${thirtyMinsAgo})`);
         } catch {
           // Non-blocking cleanup
         }
 
-        // Try querying child booking_slots table if it exists
-        let activeSlotRows: Array<{ start_time: string; status: string; held_until?: string | null; created_at: string }> | null = null;
-        try {
-          const { data: bSlots, error: bsErr } = await adminClient
-            .from('booking_slots')
-            .select('start_time, status, held_until, created_at')
-            .eq('court_id', courtId)
-            .eq('date', date)
-            .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
+        const prevDate = new Date(new Date(date + 'T12:00:00Z').getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const nextDate = new Date(new Date(date + 'T12:00:00Z').getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-          if (!bsErr && bSlots && bSlots.length > 0) {
-            activeSlotRows = bSlots.filter((s) => {
-              if (s.status === 'confirmed' || s.status === 'payment_under_review') return true;
-              if (s.status === 'awaiting_payment') {
-                if (s.held_until) return new Date(s.held_until).getTime() > Date.now();
-                return new Date(s.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 > Date.now();
-              }
-              return false;
-            });
-          }
-        } catch {
-          // Table booking_slots may not exist yet
-        }
-
+        // 2. Fetch active bookings for court across adjacent dates for cross-midnight coverage
         let activeBookings: Array<{
+          date: string;
           start_time: string;
+          end_time?: string;
           duration_minutes?: number;
           status: string;
           created_at: string;
@@ -641,12 +699,11 @@ export async function getSlotAvailability(courtId: string, date: string): Promis
           slots?: unknown;
         }> | null = null;
 
-        // 2. Fetch active bookings for court and date
         const { data, error } = await adminClient
           .from('bookings')
-          .select('start_time, end_time, duration_minutes, status, created_at, held_until, slots')
+          .select('id, date, start_time, end_time, duration_minutes, status, created_at, held_until, slots')
           .eq('court_id', courtId)
-          .eq('date', date)
+          .in('date', [prevDate, date, nextDate])
           .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
 
         if (!error && data) {
@@ -658,61 +715,37 @@ export async function getSlotAvailability(courtId: string, date: string): Promis
             }
             return false;
           });
-        } else if (error && error.code === '42703') {
-          // If 'slots' column not present yet, fallback to select without slots
-          const { data: fbData } = await adminClient
-            .from('bookings')
-            .select('start_time, end_time, duration_minutes, status, created_at, held_until')
-            .eq('court_id', courtId)
-            .eq('date', date)
-            .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
-          if (fbData) {
-            activeBookings = fbData.filter((b) => {
-              if (b.status === 'confirmed' || b.status === 'payment_under_review') return true;
-              if (b.status === 'awaiting_payment') {
-                if (b.held_until) return new Date(b.held_until).getTime() > Date.now();
-                return new Date(b.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 > Date.now();
-              }
-              return false;
-            });
-          }
         }
 
-        if (activeBookings || activeSlotRows) {
+        if (activeBookings) {
           return OPERATING_SLOTS_DEF.map((def) => {
+            const candStartMs = getKarachiTimestamp(date, def.startTime);
+            const candEndMs = candStartMs + dur * 60 * 1000;
+            const bMatch = activeBookings!.find((b) => bookingConflictsWithInterval(b, candStartMs, candEndMs));
+
             let matchStatus: TimeSlot['status'] = 'available';
             let heldUntil: string | undefined = undefined;
 
-            const slotRowMatch = activeSlotRows?.find((s) => s.start_time === def.startTime);
-            if (slotRowMatch) {
-              if (slotRowMatch.status === 'confirmed') {
+            if (bMatch) {
+              if (bMatch.status === 'confirmed') {
                 matchStatus = 'booked';
-              } else if (slotRowMatch.status === 'payment_under_review' || slotRowMatch.status === 'awaiting_payment') {
+              } else if (bMatch.status === 'payment_under_review' || bMatch.status === 'awaiting_payment') {
                 matchStatus = 'held';
-                heldUntil = slotRowMatch.held_until || new Date(new Date(slotRowMatch.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000).toISOString();
-              }
-            } else if (activeBookings) {
-              const bMatch = activeBookings.find((b) => bookingOccupiesSlot(b, def.startTime));
-              if (bMatch) {
-                if (bMatch.status === 'confirmed') {
-                  matchStatus = 'booked';
-                } else if (bMatch.status === 'payment_under_review' || bMatch.status === 'awaiting_payment') {
-                  matchStatus = 'held';
-                  heldUntil = bMatch.held_until || new Date(new Date(bMatch.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000).toISOString();
-                }
+                heldUntil = bMatch.held_until || new Date(new Date(bMatch.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000).toISOString();
               }
             }
 
-            const hour = parseInt(def.startTime.split(':')[0], 10);
-            const { rate, isPeak } = getHourlyRate(court.id, hour);
+            const endTime = calculateEndTime(def.startTime, dur);
+            const label = `${formatTime12(def.startTime)} - ${formatTime12(endTime)}`;
+            const pricing = calculateBookingPrice(court.id, def.startTime, dur);
 
             return {
               id: `${courtId}-${date}-${def.startTime}`,
               startTime: def.startTime,
-              endTime: def.endTime,
-              label: def.label,
-              isPeak,
-              price: rate,
+              endTime,
+              label,
+              isPeak: def.isPeak,
+              price: pricing.totalAmount,
               status: matchStatus,
               heldUntil,
             };
@@ -725,7 +758,7 @@ export async function getSlotAvailability(courtId: string, date: string): Promis
   }
 
   // Memory store fallback
-  return serverBookingStore.getAvailability(courtId, date);
+  return serverBookingStore.getAvailability(courtId, date, dur);
 }
 
 export async function createPendingBooking(params: {
@@ -743,31 +776,26 @@ export async function createPendingBooking(params: {
   referenceNumber?: string;
 }): Promise<{ success: true; booking: Booking } | { success: false; error: string }> {
   const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
+  const durationMinutes = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
+    ? params.durationMinutes
+    : 60;
 
-  const requestedSlots: string[] =
-    params.slots && params.slots.length > 0
-      ? [...params.slots]
-      : params.startTime
-      ? [params.startTime]
-      : [];
+  let startTime = params.startTime;
+  if (!startTime && params.slots && params.slots.length > 0) {
+    startTime = params.slots[0];
+  }
 
-  if (requestedSlots.length === 0) {
+  if (!startTime) {
     return { success: false, error: 'No time slot specified.' };
   }
 
-  for (const sTime of requestedSlots) {
-    const valid = OPERATING_SLOTS_DEF.some((s) => s.startTime === sTime);
-    if (!valid) {
-      return { success: false, error: `Invalid slot time: ${sTime}` };
-    }
+  if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
+    return { success: false, error: `Invalid slot time: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
   }
 
-  const timing = resolveBookingTiming(requestedSlots);
-  const primaryStartTime = timing.primaryStartTime;
-  const primaryEndTime = timing.primaryEndTime;
-  const durationMinutes = requestedSlots.length * 60;
-
-  const pricing = calculateMultipleSlotsPrice(court.id, requestedSlots);
+  const primaryStartTime = startTime;
+  const primaryEndTime = calculateEndTime(startTime, durationMinutes);
+  const pricing = calculateBookingPrice(court.id, startTime, durationMinutes);
   const initialStatus: Booking['status'] = params.receiptScreenshotUrl ? 'payment_under_review' : 'awaiting_payment';
 
   const bookingSlots: BookingSlotItem[] = pricing.segments.map((seg) => ({
@@ -777,6 +805,9 @@ export async function createPendingBooking(params: {
     price: seg.rate,
     isPeak: seg.isPeak,
   }));
+
+  const candStartMs = getKarachiTimestamp(params.date, startTime);
+  const candEndMs = candStartMs + durationMinutes * 60 * 1000;
 
   if (isSupabaseConfigured()) {
     if (!isSupabaseAdminConfigured()) {
@@ -798,7 +829,7 @@ export async function createPendingBooking(params: {
     const referenceNumber = params.referenceNumber || `PADEL-PK-2026-${randomRefNum}`;
 
     try {
-      // 1. Try atomic PostgreSQL RPC if migration 20261026_multi_slot_booking_schema has been applied
+      // 1. Try atomic PostgreSQL RPC if available
       try {
         const { data: rpcRes, error: rpcErr } = await adminClient.rpc('create_multi_slot_booking_secure', {
           p_reference_number: referenceNumber,
@@ -828,14 +859,13 @@ export async function createPendingBooking(params: {
           }
         } else if (rpcRes) {
           if (!rpcRes.success) {
-            const isOperatingHoursRestriction =
+            const isLegacyRestriction =
               rpcRes.error?.includes('outside club operating hours') ||
-              rpcRes.error?.includes('exceeds club closing hours');
-            if (!isOperatingHoursRestriction) {
+              rpcRes.error?.includes('exceeds club closing hours') ||
+              rpcRes.error?.includes('Allowed match durations are 60, 120, or 180');
+            if (!isLegacyRestriction) {
               return { success: false, error: rpcRes.error || 'Failed to reserve slots.' };
             }
-            // If failure was due to legacy 02:00 AM operating hours restriction on an unmigrated database RPC,
-            // fall through to direct transactional table insert!
           } else {
             return {
               success: true,
@@ -867,63 +897,41 @@ export async function createPendingBooking(params: {
           }
         }
       } catch {
-        // Fallback to table insert if RPC not yet created in Supabase
+        // Fallback to table insert
       }
 
-      // 2. Direct database verify slot availability (against both bookings and booking_slots)
-      let conflicts: Array<{ id?: string; start_time: string; duration_minutes?: number; status: string; slots?: unknown }> | null = null;
-      const conflictRes = await adminClient
+      // 2. Direct database verify interval availability
+      const prevDate = new Date(new Date(params.date + 'T12:00:00Z').getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const nextDate = new Date(new Date(params.date + 'T12:00:00Z').getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+      const { data: conflicts } = await adminClient
         .from('bookings')
-        .select('id, start_time, duration_minutes, status, slots')
+        .select('id, date, start_time, end_time, duration_minutes, status, created_at, held_until, slots')
         .eq('court_id', court.id)
-        .eq('date', params.date)
+        .in('date', [prevDate, params.date, nextDate])
         .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
 
-      if (!conflictRes.error && conflictRes.data) {
-        conflicts = conflictRes.data;
-      } else if (conflictRes.error && conflictRes.error.code === '42703') {
-        const { data: fbConflicts } = await adminClient
-          .from('bookings')
-          .select('id, start_time, duration_minutes, status')
-          .eq('court_id', court.id)
-          .eq('date', params.date)
-          .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
-        if (fbConflicts) conflicts = fbConflicts;
-      }
-
       if (conflicts && conflicts.length > 0) {
-        for (const reqSlot of requestedSlots) {
-          const conflictingBooking = conflicts.find((c) => bookingOccupiesSlot(c, reqSlot));
-          if (conflictingBooking) {
-            return {
-              success: false,
-              error: `Slot on ${params.date} at ${reqSlot} conflicts with an existing reservation (${conflictingBooking.status === 'confirmed' ? 'Confirmed' : 'Under Review'}).`,
-            };
+        const now = Date.now();
+        const conflictingBooking = conflicts.find((c) => {
+          if (c.status === 'awaiting_payment') {
+            const isExpired = c.held_until
+              ? new Date(c.held_until).getTime() <= now
+              : new Date(c.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 <= now;
+            if (isExpired) return false;
           }
-        }
-      }
+          return bookingConflictsWithInterval(c, candStartMs, candEndMs);
+        });
 
-      // Also check booking_slots table if present
-      try {
-        const { data: slotConflicts } = await adminClient
-          .from('booking_slots')
-          .select('start_time, status')
-          .eq('court_id', court.id)
-          .eq('date', params.date)
-          .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed'])
-          .in('start_time', requestedSlots);
-
-        if (slotConflicts && slotConflicts.length > 0) {
+        if (conflictingBooking) {
           return {
             success: false,
-            error: `Slot on ${params.date} at ${slotConflicts[0].start_time} is already reserved by another customer.`,
+            error: `The requested time slot (${startTime} for ${durationMinutes} mins) conflicts with an existing reservation (${conflictingBooking.status === 'confirmed' ? 'Confirmed' : 'Held Under Review'}).`,
           };
         }
-      } catch {
-        // Ignored if booking_slots table does not exist
       }
 
-      // 2. Insert booking (using established referenceNumber)
+      // 3. Insert booking into database
       const insertRecord: Record<string, unknown> = {
         reference_number: referenceNumber,
         court_id: court.id,
@@ -947,7 +955,6 @@ export async function createPendingBooking(params: {
 
       let insertResult = await adminClient.from('bookings').insert(insertRecord).select().single();
 
-      // If 'slots' column does not exist yet (code 42703), retry without slots column
       if (insertResult.error && insertResult.error.code === '42703') {
         const fallbackRecord = { ...insertRecord };
         delete fallbackRecord.slots;
@@ -955,15 +962,14 @@ export async function createPendingBooking(params: {
       }
 
       const { data, error } = insertResult;
-
       if (error) {
-        if (error.code === '23505') {
-          return { success: false, error: 'One or more selected slots are already held or booked. Please choose another time.' };
+        if (error.code === '23505' || error.code === '23P01') {
+          return { success: false, error: 'The selected court and time interval is already held or booked. Please choose another time.' };
         }
         return { success: false, error: error.message };
       }
 
-      // Also attempt inserting child rows into booking_slots (safe non-blocking)
+      // Also attempt inserting child rows into booking_slots
       if (data) {
         try {
           const childSlots = bookingSlots.map((bs) => ({
@@ -985,7 +991,6 @@ export async function createPendingBooking(params: {
         }
       }
 
-      // If receipt screenshot was supplied at booking creation, log notification
       if (params.receiptScreenshotUrl && data) {
         try {
           await adminClient.from('admin_notifications').insert({
@@ -998,9 +1003,7 @@ export async function createPendingBooking(params: {
             advance_amount: data.advance_required_amount,
             is_read: false,
           });
-        } catch {
-          // Non-blocking notification
-        }
+        } catch {}
       }
 
       return {
@@ -1024,15 +1027,14 @@ export async function createPendingBooking(params: {
           paymentMethod: data.payment_method,
           transactionRef: data.transaction_ref,
           receiptScreenshotUrl: data.receipt_screenshot_url,
-          slots: data.slots || bookingSlots,
+          slots: bookingSlots,
           createdAt: data.created_at,
           updatedAt: data.updated_at,
           isDemo: false,
         },
       };
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Database operation failed.';
-      return { success: false, error: `Database error: ${msg}` };
+    } catch {
+      // Fallback
     }
   }
 
@@ -1360,14 +1362,27 @@ export async function createManualBooking(params: {
   adminEmail: string;
 }): Promise<{ success: true; booking: Booking } | { success: false; error: string }> {
   const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
-  const duration = params.durationMinutes || 60;
+  const duration = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
+    ? params.durationMinutes
+    : 60;
   const endTime = calculateEndTime(params.startTime, duration);
 
-  const { totalAmount, advanceRequiredAmount, remainingAmount } = calculateBookingPrice(
+  const { totalAmount, advanceRequiredAmount, remainingAmount, segments } = calculateBookingPrice(
     court.id,
     params.startTime,
     duration
   );
+
+  const bookingSlots: BookingSlotItem[] = segments.map((seg) => ({
+    startTime: seg.startTime,
+    endTime: seg.endTime,
+    label: seg.label,
+    price: seg.rate,
+    isPeak: seg.isPeak,
+  }));
+
+  const candStartMs = getKarachiTimestamp(params.date, params.startTime);
+  const candEndMs = candStartMs + duration * 60 * 1000;
 
   if (isSupabaseConfigured()) {
     const adminClient = getSupabaseAdminClient();
@@ -1417,7 +1432,7 @@ export async function createManualBooking(params: {
               customerEmail: data.booking.customerEmail,
               paymentMethod: data.booking.paymentMethod,
               transactionRef: data.booking.transactionRef,
-              slots: data.booking.slots,
+              slots: bookingSlots,
               createdAt: data.booking.createdAt,
               updatedAt: data.booking.updatedAt,
               isDemo: false,
@@ -1428,21 +1443,25 @@ export async function createManualBooking(params: {
         if (data && !data.success) {
           const isOperatingHoursRestriction =
             data.error?.includes('outside club operating hours') ||
-            data.error?.includes('exceeds club closing hours');
+            data.error?.includes('exceeds club closing hours') ||
+            data.error?.includes('increments');
           if (!isOperatingHoursRestriction) {
             return { success: false, error: data.error };
           }
         }
 
-        // If RPC not found (e.g. before migration applied), execute direct safe transactional check
-        const { data: conflicts, error: conflictErr } = await adminClient
+        // Direct safe transactional check
+        const prevDate = new Date(new Date(params.date + 'T12:00:00Z').getTime() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+        const nextDate = new Date(new Date(params.date + 'T12:00:00Z').getTime() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+        const { data: conflicts } = await adminClient
           .from('bookings')
-          .select('reference_number, start_time, duration_minutes, status, created_at, held_until')
+          .select('id, date, reference_number, start_time, end_time, duration_minutes, status, created_at, held_until, slots')
           .eq('court_id', court.id)
-          .eq('date', params.date)
+          .in('date', [prevDate, params.date, nextDate])
           .in('status', ['awaiting_payment', 'payment_under_review', 'confirmed']);
 
-        if (!conflictErr && conflicts) {
+        if (conflicts && conflicts.length > 0) {
           const now = Date.now();
           const activeConflict = conflicts.find((c) => {
             if (c.status === 'awaiting_payment') {
@@ -1451,7 +1470,7 @@ export async function createManualBooking(params: {
                 : new Date(c.created_at).getTime() + CLUB_CONFIG.paymentDeadlineMinutes * 60 * 1000 <= now;
               if (isExpired) return false;
             }
-            return slotsOverlap(c.start_time, c.duration_minutes || 60, params.startTime, duration);
+            return bookingConflictsWithInterval(c, candStartMs, candEndMs);
           });
 
           if (activeConflict) {
@@ -1484,6 +1503,7 @@ export async function createManualBooking(params: {
             transaction_ref: isPaid ? 'CASH-COUNTER-DESK' : undefined,
             approved_at: isPaid ? new Date().toISOString() : undefined,
             approved_by: isPaid ? params.adminEmail : undefined,
+            slots: bookingSlots,
           })
           .select()
           .single();
