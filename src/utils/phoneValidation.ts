@@ -39,7 +39,13 @@ export function validatePakistaniMobile(input: string | null | undefined): Phone
   // Convert international prefixes to standard 11-digit local format:
   // e.g. 923162997913 (12 digits) -> 03162997913
   // e.g. 00923162997913 (14 digits) -> 03162997913
-  if (cleaned.startsWith('92') && cleaned.length === 12) {
+  // e.g. 9203162997913 (13 digits) -> 03162997913 (from "+92 03...")
+  // e.g. 009203162997913 (15 digits) -> 03162997913 (from "0092 03...")
+  if (cleaned.startsWith('00920') && cleaned.length === 15) {
+    cleaned = '0' + cleaned.slice(5);
+  } else if (cleaned.startsWith('920') && cleaned.length === 13) {
+    cleaned = '0' + cleaned.slice(3);
+  } else if (cleaned.startsWith('92') && cleaned.length === 12) {
     cleaned = '0' + cleaned.slice(2);
   } else if (cleaned.startsWith('0092') && cleaned.length === 14) {
     cleaned = '0' + cleaned.slice(4);

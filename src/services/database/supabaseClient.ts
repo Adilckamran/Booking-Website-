@@ -191,7 +191,8 @@ export async function testSupabaseConnection(): Promise<SupabaseConnectionStatus
     if (adminClient) {
       try {
         const { data: buckets } = await adminClient.storage.listBuckets();
-        if (buckets && buckets.some((b) => b.name === 'receipts-private')) {
+        const targetBucket = process.env.SUPABASE_STORAGE_BUCKET_RECEIPTS || 'receipts-private';
+        if (buckets && buckets.some((b) => b.name === targetBucket)) {
           bucketFound = true;
         }
       } catch {

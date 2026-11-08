@@ -7,8 +7,14 @@ import { DEMO_COURTS, INITIAL_DEMO_BOOKINGS, OPERATING_SLOTS_DEF } from '@/data/
 import { StatusBadge } from '@/components/common/StatusBadge';
 import { DemoBanner } from '@/components/common/DemoBadge';
 import { BrandLogo } from '@/components/common/BrandLogo';
-import { WhatsAppMessageTemplates, WHATSAPP_SETUP_CHECKLIST } from '@/services/whatsapp';
-import { Booking, AdminNotification } from '@/types';
+import {
+  WhatsAppMessageTemplates,
+  WHATSAPP_SETUP_CHECKLIST,
+  buildWhatsAppConfirmationMessage,
+  buildWhatsAppRejectionMessage,
+  getWhatsAppClickToChatUrl,
+} from '@/services/whatsapp';
+import { Booking, AdminNotification, BookingStatus } from '@/types';
 import { getSupabaseClient, isSupabaseConfigured } from '@/services/database/supabaseClient';
 import { calculateBookingPrice } from '@/services/pricing/pricingService';
 import { getKarachiDateString, getKarachiTimestamp } from '@/utils/timezone';
@@ -34,6 +40,14 @@ import {
   RefreshCw,
   X,
 } from 'lucide-react';
+
+function WhatsAppIcon({ className = "w-3.5 h-3.5" }: { className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z" />
+    </svg>
+  );
+}
 
 type AdminTab = 'bookings' | 'courts' | 'pricing' | 'payments' | 'whatsapp';
 
@@ -75,6 +89,12 @@ export default function AdminDashboardPage() {
   const [cancellingBooking, setCancellingBooking] = useState<Booking | null>(null);
   const [cancellationReason, setCancellationReason] = useState('Customer requested cancellation.');
   const [showManualBookingModal, setShowManualBookingModal] = useState(false);
+  const [whatsappPrompt, setWhatsappPrompt] = useState<{
+    isOpen: boolean;
+    type: 'confirmation' | 'rejection';
+    booking: Booking;
+    reason?: string;
+  } | null>(null);
 
   // Manual Booking Form State
   const [manualCourtId, setManualCourtId] = useState(DEMO_COURTS[0].id);
@@ -378,7 +398,8 @@ export default function AdminDashboardPage() {
     rejectingBooking ||
     cancellingBooking ||
     showManualBookingModal ||
-    showNotificationsModal
+    showNotificationsModal ||
+    (whatsappPrompt && whatsappPrompt.isOpen)
   );
 
   useEffect(() => {
@@ -393,6 +414,7 @@ export default function AdminDashboardPage() {
           setCancellingBooking(null);
           setShowManualBookingModal(false);
           setShowNotificationsModal(false);
+          setWhatsappPrompt(null);
         }
       };
 
@@ -405,6 +427,19 @@ export default function AdminDashboardPage() {
   }, [isAnyModalOpen]);
 
   // Actions
+  const handleOpenWhatsApp = (
+    booking: Booking,
+    type: 'confirmation' | 'rejection',
+    reason?: string
+  ) => {
+    const result = getWhatsAppClickToChatUrl(booking, type, reason);
+    if (!result.url) {
+      showToast(result.error || `Invalid Pakistani WhatsApp number for ${booking.customerName}.`);
+      return;
+    }
+    window.open(result.url, '_blank', 'noopener,noreferrer');
+  };
+
   const handleConfirmPayment = async (bookingId: string) => {
     const target = bookings.find((b) => b.id === bookingId);
     if (!target) return;
@@ -422,8 +457,14 @@ export default function AdminDashboardPage() {
         return;
       }
 
+      const updatedBooking: Booking = data.booking || {
+        ...target,
+        status: 'confirmed' as BookingStatus,
+        updatedAt: new Date().toISOString(),
+      };
+
       setBookings((prev) =>
-        prev.map((b) => (b.referenceNumber === target.referenceNumber ? data.booking : b))
+        prev.map((b) => (b.referenceNumber === target.referenceNumber ? updatedBooking : b))
       );
 
       let notifInfo = '';
@@ -444,6 +485,14 @@ export default function AdminDashboardPage() {
       if (selectedReceiptBooking?.id === bookingId) {
         setSelectedReceiptBooking(null);
       }
+
+      // Prompt immediate WhatsApp confirmation to customer
+      setWhatsappPrompt({
+        isOpen: true,
+        type: 'confirmation',
+        booking: updatedBooking,
+      });
+
       fetchAdminData();
     } catch {
       showToast('Network error confirming payment.');
@@ -458,12 +507,14 @@ export default function AdminDashboardPage() {
       return;
     }
 
+    const currentReason = rejectionReason.trim();
+
     try {
       const res = await fetch(`/api/admin/bookings/${encodeURIComponent(rejectingBooking.referenceNumber)}/reject`, {
         method: 'POST',
         headers: getAdminHeaders(),
         body: JSON.stringify({
-          rejectionReason: rejectionReason.trim(),
+          rejectionReason: currentReason,
         }),
       });
 
@@ -474,8 +525,15 @@ export default function AdminDashboardPage() {
         return;
       }
 
+      const updatedBooking: Booking = data.booking || {
+        ...rejectingBooking,
+        status: 'rejected' as BookingStatus,
+        rejectionReason: currentReason,
+        updatedAt: new Date().toISOString(),
+      };
+
       setBookings((prev) =>
-        prev.map((b) => (b.referenceNumber === rejectingBooking.referenceNumber ? data.booking : b))
+        prev.map((b) => (b.referenceNumber === rejectingBooking.referenceNumber ? updatedBooking : b))
       );
 
       let notifInfo = '';
@@ -494,6 +552,15 @@ export default function AdminDashboardPage() {
 
       showToast(`Payment rejected & slot released!${notifInfo}`);
       setRejectingBooking(null);
+
+      // Prompt immediate WhatsApp rejection notification to customer
+      setWhatsappPrompt({
+        isOpen: true,
+        type: 'rejection',
+        booking: updatedBooking,
+        reason: currentReason,
+      });
+
       fetchAdminData();
     } catch {
       showToast('Network error rejecting payment.');
@@ -565,6 +632,13 @@ export default function AdminDashboardPage() {
       setManualCustomerEmail('');
       setManualBookingError(null);
       showToast(`Manual booking created (${data.booking.referenceNumber}) and slot locked.`);
+      if (data.booking) {
+        setWhatsappPrompt({
+          isOpen: true,
+          type: 'confirmation',
+          booking: data.booking,
+        });
+      }
       fetchAdminData();
     } catch {
       setManualBookingError('Network error creating manual booking. Please try again.');
@@ -1119,7 +1193,17 @@ export default function AdminDashboardPage() {
                             {/* Player */}
                             <td className="py-3 px-4">
                               <span className="font-semibold text-slate-900 block">{b.customerName}</span>
-                              <span className="text-slate-500 text-[11px] block">{b.customerPhone}</span>
+                              <div className="flex items-center gap-1.5 text-slate-500 text-[11px] mt-0.5">
+                                <span>{b.customerPhone}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenWhatsApp(b, b.status === 'rejected' ? 'rejection' : 'confirmation')}
+                                  className="text-emerald-600 hover:text-emerald-700 p-0.5 rounded hover:bg-emerald-50 transition-colors inline-flex items-center cursor-pointer"
+                                  title={`Open WhatsApp chat with ${b.customerName}`}
+                                >
+                                  <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
+                                </button>
+                              </div>
                               {b.customerEmail && (
                                 <span className="text-slate-400 text-[10px] block truncate max-w-[150px]">{b.customerEmail}</span>
                               )}
@@ -1174,7 +1258,7 @@ export default function AdminDashboardPage() {
                                     <button
                                       type="button"
                                       onClick={() => handleConfirmPayment(b.id)}
-                                      className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] transition-colors"
+                                      className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-[11px] transition-colors cursor-pointer"
                                       title="Confirm Payment & Lock Slot"
                                     >
                                       Confirm
@@ -1182,7 +1266,7 @@ export default function AdminDashboardPage() {
                                     <button
                                       type="button"
                                       onClick={() => setRejectingBooking(b)}
-                                      className="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] border border-rose-200 transition-colors"
+                                      className="px-2 py-1 rounded bg-rose-50 hover:bg-rose-100 text-rose-700 font-semibold text-[11px] border border-rose-200 transition-colors cursor-pointer"
                                       title="Reject Payment"
                                     >
                                       Reject
@@ -1194,9 +1278,33 @@ export default function AdminDashboardPage() {
                                   <button
                                     type="button"
                                     onClick={() => handleConfirmPayment(b.id)}
-                                    className="px-2 py-1 rounded bg-[#0A2540] hover:bg-emerald-600 text-white text-[11px] font-medium transition-colors"
+                                    className="px-2 py-1 rounded bg-[#0A2540] hover:bg-emerald-600 text-white text-[11px] font-medium transition-colors cursor-pointer"
                                   >
                                     Mark Paid
+                                  </button>
+                                )}
+
+                                {b.status === 'confirmed' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenWhatsApp(b, 'confirmation')}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-semibold text-[11px] transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98]"
+                                    title="Open WhatsApp Confirmation Chat (wa.me)"
+                                  >
+                                    <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>WhatsApp</span>
+                                  </button>
+                                )}
+
+                                {b.status === 'rejected' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleOpenWhatsApp(b, 'rejection')}
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-semibold text-[11px] transition-all cursor-pointer shadow-sm hover:scale-[1.02] active:scale-[0.98]"
+                                    title="Open WhatsApp Rejection Notice (wa.me)"
+                                  >
+                                    <WhatsAppIcon className="w-3.5 h-3.5 text-emerald-600" />
+                                    <span>WhatsApp</span>
                                   </button>
                                 )}
 
@@ -1204,7 +1312,7 @@ export default function AdminDashboardPage() {
                                   <button
                                     type="button"
                                     onClick={() => setCancellingBooking(b)}
-                                    className="p-1 rounded text-slate-400 hover:text-slate-700"
+                                    className="p-1 rounded text-slate-400 hover:text-slate-700 cursor-pointer"
                                     title="Cancel Booking"
                                   >
                                     <Ban className="w-3.5 h-3.5" />
@@ -1717,7 +1825,9 @@ export default function AdminDashboardPage() {
                       '00:00 - 01:00',
                       500,
                       3500,
-                      CLUB_CONFIG.locationArea
+                      CLUB_CONFIG.locationArea,
+                      60,
+                      4000
                     )}
                   </div>
                 </div>
@@ -1800,7 +1910,21 @@ export default function AdminDashboardPage() {
                     </div>
                     <div>
                       <span className="text-slate-500 font-medium block">Phone / WhatsApp:</span>
-                      <p className="font-bold text-slate-900 font-mono mt-0.5">{selectedReceiptBooking.customerPhone}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="font-bold text-slate-900 font-mono">{selectedReceiptBooking.customerPhone}</p>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenWhatsApp(
+                            selectedReceiptBooking,
+                            selectedReceiptBooking.status === 'rejected' ? 'rejection' : 'confirmation'
+                          )}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-[10px] font-semibold transition-colors cursor-pointer"
+                          title="Open WhatsApp Chat"
+                        >
+                          <WhatsAppIcon className="w-3 h-3 text-emerald-600" />
+                          <span>Chat</span>
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <span className="text-slate-500 font-medium block">Email:</span>
@@ -1975,23 +2099,45 @@ export default function AdminDashboardPage() {
                 >
                   Dismiss
                 </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setRejectingBooking(selectedReceiptBooking);
-                    setSelectedReceiptBooking(null);
-                  }}
-                  className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 font-bold text-xs transition-colors cursor-pointer"
-                >
-                  Reject Payment
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleConfirmPayment(selectedReceiptBooking.id)}
-                  className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
-                >
-                  Confirm Payment & Lock Slot
-                </button>
+                {selectedReceiptBooking.status === 'confirmed' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenWhatsApp(selectedReceiptBooking, 'confirmation')}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                  >
+                    <WhatsAppIcon className="w-4 h-4" />
+                    <span>Send WhatsApp Confirmation</span>
+                  </button>
+                ) : selectedReceiptBooking.status === 'rejected' ? (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenWhatsApp(selectedReceiptBooking, 'rejection')}
+                    className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer"
+                  >
+                    <WhatsAppIcon className="w-4 h-4" />
+                    <span>Send WhatsApp Rejection</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setRejectingBooking(selectedReceiptBooking);
+                        setSelectedReceiptBooking(null);
+                      }}
+                      className="px-4 py-2.5 rounded-xl bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 font-bold text-xs transition-colors cursor-pointer"
+                    >
+                      Reject Payment
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleConfirmPayment(selectedReceiptBooking.id)}
+                      className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs shadow-md transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+                    >
+                      Confirm Payment & Lock Slot
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -2451,6 +2597,109 @@ export default function AdminDashboardPage() {
                 className="px-4 py-2 rounded-xl bg-slate-200/80 hover:bg-slate-300 text-slate-700 font-semibold text-xs transition-colors cursor-pointer"
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* MODAL 5: WHATSAPP CLICK-TO-CHAT PROMPT MODAL */}
+      {/* ========================================================================= */}
+      {whatsappPrompt && whatsappPrompt.isOpen && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/75 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-hidden"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setWhatsappPrompt(null);
+          }}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-lg w-full max-h-[90dvh] flex flex-col shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in-95 duration-150"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="whatsapp-prompt-title"
+          >
+            <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                  <WhatsAppIcon className="w-5 h-5 text-emerald-600" />
+                </div>
+                <div>
+                  <h3 id="whatsapp-prompt-title" className="font-bold text-base text-slate-900">
+                    {whatsappPrompt.type === 'confirmation' ? 'Booking Confirmed & Locked!' : 'Payment Rejection Complete'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Notify player directly via WhatsApp with pre-filled details
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWhatsappPrompt(null)}
+                className="w-8 h-8 rounded-xl bg-slate-200/70 hover:bg-slate-300 text-slate-700 flex items-center justify-center transition-colors cursor-pointer"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2 text-xs">
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Customer:</span>
+                  <span className="font-bold text-slate-900">{whatsappPrompt.booking.customerName}</span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Customer WhatsApp:</span>
+                  <span className="font-mono font-bold text-slate-900">{whatsappPrompt.booking.customerPhone}</span>
+                </div>
+                <div className="flex justify-between items-center pb-2 border-b border-slate-200">
+                  <span className="text-slate-500 font-medium">Booking Ref:</span>
+                  <span className="font-mono font-bold text-blue-700">{whatsappPrompt.booking.referenceNumber}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Schedule:</span>
+                  <span className="font-medium text-slate-800">
+                    {whatsappPrompt.booking.courtName} • {whatsappPrompt.booking.date} ({whatsappPrompt.booking.startTime} - {whatsappPrompt.booking.endTime})
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
+                  Pre-filled Message Preview
+                </label>
+                <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 font-mono text-[11px] text-slate-700 whitespace-pre-line max-h-48 overflow-y-auto leading-relaxed">
+                  {whatsappPrompt.type === 'confirmation'
+                    ? buildWhatsAppConfirmationMessage(whatsappPrompt.booking)
+                    : buildWhatsAppRejectionMessage(whatsappPrompt.booking, whatsappPrompt.reason)}
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 border-t border-slate-200 bg-slate-50 flex items-center justify-between gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={() => setWhatsappPrompt(null)}
+                className="px-4 py-2 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-100 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Skip / Close
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  handleOpenWhatsApp(
+                    whatsappPrompt.booking,
+                    whatsappPrompt.type,
+                    whatsappPrompt.reason
+                  );
+                  setWhatsappPrompt(null);
+                }}
+                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md transition-all cursor-pointer hover:scale-[1.01] active:scale-[0.99]"
+              >
+                <WhatsAppIcon className="w-4 h-4" />
+                <span>Open WhatsApp Web / Chat</span>
               </button>
             </div>
           </div>

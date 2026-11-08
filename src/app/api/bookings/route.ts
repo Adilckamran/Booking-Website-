@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createPendingBooking } from '@/services/booking/bookingRepository';
+import { createPendingBooking, validateConsecutiveIntervals } from '@/services/booking/bookingRepository';
+import { calculateEndTime } from '@/services/pricing/pricingService';
 import { isSupabaseConfigured } from '@/services/database/supabaseClient';
 import { uploadPrivateReceipt, RECEIPT_STORAGE_CONFIG, validateReceiptFile } from '@/services/storage/receiptStorage';
 import { validatePakistaniMobile } from '@/utils/phoneValidation';
@@ -170,14 +171,38 @@ export async function POST(request: NextRequest) {
     }
 
     const parsedDuration = durationMinutes;
-    const primaryStartTime = startTime || (parsedSlots.length > 0 ? parsedSlots[0] : '');
+    const expectedIntervalCount = parsedDuration / 30;
 
-    // Validate 30-minute start time format (HH:00 or HH:30 across 24h)
-    if (!primaryStartTime || !/^([01][0-9]|2[0-3]):(00|30)$/.test(primaryStartTime)) {
-      return NextResponse.json(
-        { success: false, error: `Invalid start time: ${primaryStartTime}. Must be in 30-minute intervals (e.g. 19:00, 19:30).` },
-        { status: 400 }
-      );
+    let primaryStartTime = '';
+    let validatedSlots: string[] = [];
+
+    // If multiple slots were submitted, validate consecutive intervals
+    if (parsedSlots.length > 1) {
+      const val = validateConsecutiveIntervals(parsedSlots, parsedDuration);
+      if (!val.valid) {
+        return NextResponse.json(
+          { success: false, error: val.error },
+          { status: 400 }
+        );
+      }
+      primaryStartTime = val.startTime!;
+      validatedSlots = val.intervals!;
+    } else {
+      // Single slot or start time submitted
+      const singleStart = (parsedSlots.length === 1 ? parsedSlots[0] : startTime).trim();
+      if (!singleStart || !/^([01][0-9]|2[0-3]):(00|30)$/.test(singleStart)) {
+        return NextResponse.json(
+          { success: false, error: `Invalid start time: "${singleStart || 'empty'}". Must be in 30-minute intervals (e.g. 19:00, 19:30).` },
+          { status: 400 }
+        );
+      }
+      primaryStartTime = singleStart;
+      // Auto-expand single start time to the required consecutive intervals
+      let cur = primaryStartTime;
+      for (let i = 0; i < expectedIntervalCount; i++) {
+        validatedSlots.push(cur);
+        cur = calculateEndTime(cur, 30);
+      }
     }
 
     if (!customerName || !customerName.trim() || customerName.trim().length < 3) {
@@ -201,7 +226,7 @@ export async function POST(request: NextRequest) {
       courtId,
       date,
       startTime: primaryStartTime,
-      slots: parsedSlots,
+      slots: validatedSlots,
       durationMinutes: parsedDuration,
       customerName: customerName.trim(),
       customerPhone: normalizedPhone,

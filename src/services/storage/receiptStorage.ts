@@ -16,7 +16,7 @@
  */
 
 export const RECEIPT_STORAGE_CONFIG = {
-  bucketName: 'receipts-private',
+  bucketName: process.env.SUPABASE_STORAGE_BUCKET_RECEIPTS || 'receipts-private',
   maxFileSizeBytes: 5 * 1024 * 1024, // 5 Megabytes
   maxFileSizeMB: 5,
   allowedMimeTypes: [

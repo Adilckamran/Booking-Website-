@@ -73,8 +73,11 @@ export function isWhatsAppConfigured(): boolean {
 
 /**
  * Normalizes a Pakistani phone number to WhatsApp international format (e.g., 923272834501).
+ * Accepts strings like "03001234567", "+92 300 1234567", "00923001234567", "923001234567".
+ * Returns null if the phone is null, empty, or not a valid Pakistani cellular number.
  */
-export function formatPhoneForWhatsApp(phone: string): string | null {
+export function formatPhoneForWhatsApp(phone: string | null | undefined): string | null {
+  if (!phone || typeof phone !== 'string') return null;
   const res = validatePakistaniMobile(phone);
   if (!res.valid || !res.normalized) return null;
   const normalized = res.normalized;
@@ -90,6 +93,138 @@ export function formatPhoneForWhatsApp(phone: string): string | null {
 }
 
 /**
+ * Click-to-chat payload structure for direct wa.me URL creation.
+ */
+export interface WhatsAppClickToChatResult {
+  url: string | null;
+  phone: string | null;
+  message: string;
+  error?: string;
+}
+
+/**
+ * Builds a dynamic, comprehensive booking confirmation message for WhatsApp click-to-chat.
+ * Adheres strictly to requirements:
+ * - Customer name
+ * - Booking reference
+ * - Date
+ * - Start time & end time
+ * - Court name
+ * - Duration
+ * - Total amount
+ * - Advance payment
+ * - Remaining amount (if any)
+ */
+export function buildWhatsAppConfirmationMessage(booking: Booking): string {
+  const duration = booking.durationMinutes
+    ? `${booking.durationMinutes} mins`
+    : booking.slots && booking.slots.length > 0
+    ? `${booking.slots.length * 60} mins`
+    : '60 mins';
+
+  const slotTime = booking.slots && booking.slots.length > 1
+    ? `${booking.startTime} - ${booking.endTime} (${booking.slots.map((s) => `${s.startTime} - ${s.endTime}`).join(', ')})`
+    : `${booking.startTime} - ${booking.endTime}`;
+
+  const remaining = booking.remainingAmount > 0
+    ? `PKR ${booking.remainingAmount.toLocaleString()}`
+    : 'PKR 0 (Fully Paid)';
+
+  return (
+    `✅ *BOOKING CONFIRMED — POWER PADEL ARENA*\n\n` +
+    `Assalam-o-Alaikum *${booking.customerName}*,\n` +
+    `Your court booking is officially verified and confirmed.\n\n` +
+    `📋 *Match Details:*\n` +
+    `• Booking Ref: *${booking.referenceNumber}*\n` +
+    `• Court: ${booking.courtName}\n` +
+    `• Date: ${booking.date}\n` +
+    `• Time: ${slotTime}\n` +
+    `• Duration: ${duration}\n` +
+    `• Total Amount: PKR ${booking.totalAmount.toLocaleString()}\n` +
+    `• Advance Received: PKR ${booking.advanceRequiredAmount.toLocaleString()}\n` +
+    `• Remaining Balance: ${remaining}\n\n` +
+    `📍 *Location:*\n` +
+    `${CLUB_CONFIG.locationArea}\n\n` +
+    `👟 *Court Guidelines:*\n` +
+    `• Non-marking sports shoes only.\n` +
+    `• Please arrive 10 minutes prior to your match.\n\n` +
+    `See you on the court! 🎾`
+  );
+}
+
+/**
+ * Builds a dynamic, polite booking rejection message for WhatsApp click-to-chat.
+ * Adheres strictly to requirements:
+ * - Customer name
+ * - Booking reference
+ * - Court name, date, slot time
+ * - Rejection reason
+ * - Club contact info
+ */
+export function buildWhatsAppRejectionMessage(
+  booking: Booking,
+  rejectionReason?: string
+): string {
+  const slotTime = booking.slots && booking.slots.length > 1
+    ? `${booking.startTime} - ${booking.endTime} (${booking.slots.map((s) => `${s.startTime} - ${s.endTime}`).join(', ')})`
+    : `${booking.startTime} - ${booking.endTime}`;
+
+  const reason = (rejectionReason || booking.rejectionReason || '').trim() ||
+    'Transaction reference ID not matched in bank statement.';
+
+  return (
+    `❌ *BOOKING UPDATE — POWER PADEL ARENA*\n\n` +
+    `Dear *${booking.customerName}*,\n` +
+    `Your booking request *${booking.referenceNumber}* could not be approved by management.\n\n` +
+    `📋 *Booking Details:*\n` +
+    `• Court: ${booking.courtName}\n` +
+    `• Date: ${booking.date}\n` +
+    `• Match Slot: ${slotTime}\n\n` +
+    `⚠️ *Reason for Rejection:*\n` +
+    `${reason}\n\n` +
+    `The slot hold has been released. If you have already transferred funds or have questions, please reach out to us:\n` +
+    `📞 Phone: ${CLUB_CONFIG.contactPhonePlaceholder}\n` +
+    `✉️ Email: ${CLUB_CONFIG.businessEmail}\n\n` +
+    `Power Padel Arena Management`
+  );
+}
+
+/**
+ * Generates an official WhatsApp click-to-chat URL (https://wa.me/PHONE?text=MESSAGE)
+ * without requiring third-party APIs.
+ */
+export function getWhatsAppClickToChatUrl(
+  booking: Booking,
+  type: 'confirmation' | 'rejection',
+  rejectionReason?: string
+): WhatsAppClickToChatResult {
+  const phone = formatPhoneForWhatsApp(booking.customerPhone);
+
+  const message = type === 'confirmation'
+    ? buildWhatsAppConfirmationMessage(booking)
+    : buildWhatsAppRejectionMessage(booking, rejectionReason);
+
+  if (!phone) {
+    return {
+      url: null,
+      phone: null,
+      message,
+      error: booking.customerPhone
+        ? `Customer phone number "${booking.customerPhone}" is not a valid Pakistani mobile number (+92 3xx required).`
+        : 'Customer phone number is missing from booking record.',
+    };
+  }
+
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+
+  return {
+    url,
+    phone,
+    message,
+  };
+}
+
+/**
  * Message templates generator adhering to Meta standards.
  */
 export const WhatsAppMessageTemplates = {
@@ -101,8 +236,12 @@ export const WhatsAppMessageTemplates = {
     slotTime: string,
     advancePaid: number,
     remainingAmount: number,
-    address: string
+    address: string,
+    durationMinutes: number = 60,
+    totalAmount?: number
   ): string {
+    const computedTotal = totalAmount !== undefined ? totalAmount : advancePaid + remainingAmount;
+    const remaining = remainingAmount > 0 ? `PKR ${remainingAmount.toLocaleString()}` : 'PKR 0 (Fully Paid)';
     return (
       `✅ *BOOKING CONFIRMED — POWER PADEL ARENA*\n\n` +
       `Assalam-o-Alaikum *${customerName}*,\n` +
@@ -112,13 +251,15 @@ export const WhatsAppMessageTemplates = {
       `• Court: ${courtName}\n` +
       `• Date: ${date}\n` +
       `• Time: ${slotTime}\n` +
+      `• Duration: ${durationMinutes} mins\n` +
+      `• Total Court Fee: PKR ${computedTotal.toLocaleString()}\n` +
       `• Advance Received: PKR ${advancePaid.toLocaleString()}\n` +
-      `• Remaining Balance: PKR ${remainingAmount.toLocaleString()}\n\n` +
+      `• Remaining Balance: ${remaining}\n\n` +
       `📍 *Location:*\n` +
       `${address}\n\n` +
       `👟 *Court Guidelines:*\n` +
-      `Non-marking sports shoes only. Please arrive 10 minutes prior to your slot.\n\n` +
-      `See you on the court!`
+      `• Non-marking sports shoes only. Please arrive 10 minutes prior to your slot.\n\n` +
+      `See you on the court! 🎾`
     );
   },
 
@@ -134,10 +275,12 @@ export const WhatsAppMessageTemplates = {
       `❌ *BOOKING UPDATE — POWER PADEL ARENA*\n\n` +
       `Dear *${customerName}*,\n` +
       `Your booking request *${referenceNumber}* could not be approved by management.\n\n` +
-      `Court: ${courtName}\n` +
-      `Date & Slot: ${date} (${slotTime})\n\n` +
+      `📋 *Booking Details:*\n` +
+      `• Court: ${courtName}\n` +
+      `• Date: ${date}\n` +
+      `• Match Slot: ${slotTime}\n\n` +
       `⚠️ *Reason:* ${rejectionReason || 'Transaction ID not matched in statement'}\n\n` +
-      `The slot hold has been released. If you have questions or completed payment, please contact club reception at ${CLUB_CONFIG.businessEmail}.`
+      `The slot hold has been released. If you have questions or completed payment, please contact club reception at ${CLUB_CONFIG.businessEmail} or ${CLUB_CONFIG.contactPhonePlaceholder}.`
     );
   },
 
@@ -246,7 +389,9 @@ export async function sendWhatsAppBookingConfirmation(
             : `${booking.startTime} - ${booking.endTime}`,
           booking.advanceRequiredAmount,
           booking.remainingAmount,
-          CLUB_CONFIG.locationArea
+          CLUB_CONFIG.locationArea,
+          booking.durationMinutes || 60,
+          booking.totalAmount
         ),
       },
     };

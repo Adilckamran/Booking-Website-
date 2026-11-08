@@ -10,6 +10,7 @@ import {
   calculateBookingPrice,
   calculateEndTime,
   getHourlyRate,
+  getHalfHourRate,
   calculateMultipleSlotsPrice,
 } from '@/services/pricing/pricingService';
 import { getKarachiTimestamp, formatTime12, getKarachiDateString } from '@/utils/timezone';
@@ -84,6 +85,89 @@ export function intervalsOverlap(
   end2Ms: number
 ): boolean {
   return start1Ms < end2Ms && end1Ms > start2Ms;
+}
+
+export interface IntervalValidationResult {
+  valid: boolean;
+  error?: string;
+  startTime?: string;
+  endTime?: string;
+  intervals?: string[];
+}
+
+/**
+ * Validates that the requested slots conform to 30-minute interval rules:
+ * - 60 minutes = exactly 2 consecutive 30-minute intervals
+ * - 90 minutes = exactly 3 consecutive 30-minute intervals
+ * - 120 minutes = exactly 4 consecutive 30-minute intervals
+ * - Reject missing, duplicate, overlapping, or non-consecutive intervals
+ */
+export function validateConsecutiveIntervals(
+  slots: string[],
+  durationMinutes: number
+): IntervalValidationResult {
+  if (![60, 90, 120].includes(durationMinutes)) {
+    return {
+      valid: false,
+      error: `Invalid match duration: ${durationMinutes} minutes. Permitted durations are strictly 60, 90, or 120 minutes.`,
+    };
+  }
+
+  const expectedCount = durationMinutes / 30;
+
+  if (!slots || slots.length === 0) {
+    return {
+      valid: false,
+      error: `Please select ${expectedCount} consecutive 30-minute intervals for your ${durationMinutes}-minute match.`,
+    };
+  }
+
+  if (slots.length !== expectedCount) {
+    return {
+      valid: false,
+      error: `For a ${durationMinutes}-minute match, exactly ${expectedCount} consecutive 30-minute interval(s) must be selected (received ${slots.length}).`,
+    };
+  }
+
+  // Check for duplicate intervals
+  const unique = new Set(slots);
+  if (unique.size !== slots.length) {
+    return {
+      valid: false,
+      error: 'Duplicate time intervals selected. Each selected interval must be distinct.',
+    };
+  }
+
+  // Check valid 30-minute time format
+  for (const s of slots) {
+    if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(s)) {
+      return {
+        valid: false,
+        error: `Invalid slot time format: "${s}". Intervals must start on the hour or half-hour (e.g. 19:00, 19:30).`,
+      };
+    }
+  }
+
+  // Check strict consecutive adjacency
+  for (let i = 0; i < slots.length - 1; i++) {
+    const expectedNext = calculateEndTime(slots[i], 30);
+    if (slots[i + 1] !== expectedNext) {
+      return {
+        valid: false,
+        error: `Selected intervals must be consecutive on the same court. Interval ${slots[i]} cannot be followed by ${slots[i + 1]} (expected ${expectedNext}).`,
+      };
+    }
+  }
+
+  const startTime = slots[0];
+  const endTime = calculateEndTime(slots[slots.length - 1], 30);
+
+  return {
+    valid: true,
+    startTime,
+    endTime,
+    intervals: slots,
+  };
 }
 
 /**
@@ -205,7 +289,7 @@ class ServerBookingStore {
 
     return OPERATING_SLOTS_DEF.map((def) => {
       const candStartMs = getKarachiTimestamp(date, def.startTime);
-      const candEndMs = candStartMs + dur * 60 * 1000;
+      const candEndMs = candStartMs + 30 * 60 * 1000;
       const activeMatch = activeBookings.find((b) => bookingConflictsWithInterval(b, candStartMs, candEndMs));
 
       let status: TimeSlot['status'] = 'available';
@@ -220,17 +304,18 @@ class ServerBookingStore {
         }
       }
 
-      const endTime = calculateEndTime(def.startTime, dur);
+      const [h, m] = def.startTime.split(':').map(Number);
+      const rateInfo = getHalfHourRate(court.id, h, m || 0);
+      const endTime = calculateEndTime(def.startTime, 30);
       const label = `${formatTime12(def.startTime)} - ${formatTime12(endTime)}`;
-      const pricing = calculateBookingPrice(court.id, def.startTime, dur);
 
       return {
         id: `${courtId}-${date}-${def.startTime}`,
         startTime: def.startTime,
         endTime,
         label,
-        isPeak: def.isPeak,
-        price: pricing.totalAmount,
+        isPeak: rateInfo.isPeak,
+        price: rateInfo.rate,
         status,
         heldUntil,
       };
@@ -258,16 +343,20 @@ class ServerBookingStore {
       : 60;
 
     let startTime = params.startTime;
-    if (!startTime && params.slots && params.slots.length > 0) {
-      startTime = params.slots[0];
-    }
+    let slotList = params.slots;
 
-    if (!startTime) {
+    if (slotList && slotList.length > 0) {
+      const val = validateConsecutiveIntervals(slotList, durationMinutes);
+      if (!val.valid) {
+        return { success: false, error: val.error! };
+      }
+      startTime = val.startTime!;
+    } else if (startTime) {
+      if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
+        return { success: false, error: `Invalid slot time format: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
+      }
+    } else {
       return { success: false, error: 'No time slot specified.' };
-    }
-
-    if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
-      return { success: false, error: `Invalid slot time format: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
     }
 
     const candStartMs = getKarachiTimestamp(params.date, startTime);
@@ -720,7 +809,7 @@ export async function getSlotAvailability(
         if (activeBookings) {
           return OPERATING_SLOTS_DEF.map((def) => {
             const candStartMs = getKarachiTimestamp(date, def.startTime);
-            const candEndMs = candStartMs + dur * 60 * 1000;
+            const candEndMs = candStartMs + 30 * 60 * 1000;
             const bMatch = activeBookings!.find((b) => bookingConflictsWithInterval(b, candStartMs, candEndMs));
 
             let matchStatus: TimeSlot['status'] = 'available';
@@ -735,17 +824,18 @@ export async function getSlotAvailability(
               }
             }
 
-            const endTime = calculateEndTime(def.startTime, dur);
+            const [h, m] = def.startTime.split(':').map(Number);
+            const rateInfo = getHalfHourRate(court.id, h, m || 0);
+            const endTime = calculateEndTime(def.startTime, 30);
             const label = `${formatTime12(def.startTime)} - ${formatTime12(endTime)}`;
-            const pricing = calculateBookingPrice(court.id, def.startTime, dur);
 
             return {
               id: `${courtId}-${date}-${def.startTime}`,
               startTime: def.startTime,
               endTime,
               label,
-              isPeak: def.isPeak,
-              price: pricing.totalAmount,
+              isPeak: rateInfo.isPeak,
+              price: rateInfo.rate,
               status: matchStatus,
               heldUntil,
             };
@@ -774,23 +864,27 @@ export async function createPendingBooking(params: {
   transactionRef?: string;
   receiptScreenshotUrl?: string;
   referenceNumber?: string;
-}): Promise<{ success: true; booking: Booking } | { success: false; error: string }> {
+}): Promise<{ success: true; booking: Booking } | { success: false; error: string; isConflict?: boolean }> {
   const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
   const durationMinutes = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
     ? params.durationMinutes
     : 60;
 
   let startTime = params.startTime;
-  if (!startTime && params.slots && params.slots.length > 0) {
-    startTime = params.slots[0];
-  }
+  let slotList = params.slots;
 
-  if (!startTime) {
+  if (slotList && slotList.length > 0) {
+    const val = validateConsecutiveIntervals(slotList, durationMinutes);
+    if (!val.valid) {
+      return { success: false, error: val.error! };
+    }
+    startTime = val.startTime!;
+  } else if (startTime) {
+    if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
+      return { success: false, error: `Invalid slot time: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
+    }
+  } else {
     return { success: false, error: 'No time slot specified.' };
-  }
-
-  if (!/^([01][0-9]|2[0-3]):(00|30)$/.test(startTime)) {
-    return { success: false, error: `Invalid slot time: ${startTime}. Slots must be on the hour or half-hour (e.g. 19:00, 19:30).` };
   }
 
   const primaryStartTime = startTime;
@@ -831,7 +925,7 @@ export async function createPendingBooking(params: {
     try {
       // 1. Try atomic PostgreSQL RPC if available
       try {
-        const { data: rpcRes, error: rpcErr } = await adminClient.rpc('create_multi_slot_booking_secure', {
+        const rpcPayload = {
           p_reference_number: referenceNumber,
           p_court_id: court.id,
           p_court_name: court.name,
@@ -850,7 +944,17 @@ export async function createPendingBooking(params: {
           p_receipt_screenshot_url: params.receiptScreenshotUrl || null,
           p_status: initialStatus,
           p_slots: bookingSlots,
-        });
+        };
+
+        // Try modern 30-minute interval RPC first
+        let { data: rpcRes, error: rpcErr } = await adminClient.rpc('create_multi_slot_booking', rpcPayload);
+
+        // If modern RPC is missing, try create_multi_slot_booking_secure
+        if (rpcErr && (rpcErr.code === '42883' || rpcErr.message.includes('function') || rpcErr.message.includes('not found'))) {
+          const fallbackRpc = await adminClient.rpc('create_multi_slot_booking_secure', rpcPayload);
+          rpcRes = fallbackRpc.data;
+          rpcErr = fallbackRpc.error;
+        }
 
         if (rpcErr) {
           const isRpcMissing = rpcErr.code === '42883' || rpcErr.message.includes('function') || rpcErr.message.includes('not found');
@@ -862,9 +966,12 @@ export async function createPendingBooking(params: {
             const isLegacyRestriction =
               rpcRes.error?.includes('outside club operating hours') ||
               rpcRes.error?.includes('exceeds club closing hours') ||
+              rpcRes.error?.includes('one-hour slot(s)') ||
+              rpcRes.error?.includes('one-hour') ||
+              rpcRes.error?.includes('Slot count mismatch') ||
               rpcRes.error?.includes('Allowed match durations are 60, 120, or 180');
             if (!isLegacyRestriction) {
-              return { success: false, error: rpcRes.error || 'Failed to reserve slots.' };
+              return { success: false, error: rpcRes.error || 'Failed to reserve slots.', isConflict: rpcRes.isConflict };
             }
           } else {
             return {
@@ -1091,7 +1198,7 @@ export async function submitReceipt(params: {
   paymentMethod: PaymentMethod;
   transactionRef?: string;
   receiptScreenshotUrl?: string;
-}): Promise<{ success: true; booking: Booking } | { success: false; error: string }> {
+}): Promise<{ success: true; booking: Booking } | { success: false; error: string; isConflict?: boolean }> {
   const adminClient = getSupabaseAdminClient();
   if (adminClient) {
     try {
@@ -1360,7 +1467,7 @@ export async function createManualBooking(params: {
   paymentMethod?: PaymentMethod;
   isPaid?: boolean;
   adminEmail: string;
-}): Promise<{ success: true; booking: Booking } | { success: false; error: string }> {
+}): Promise<{ success: true; booking: Booking } | { success: false; error: string; isConflict?: boolean }> {
   const court = DEMO_COURTS.find((c) => c.id === params.courtId) || DEMO_COURTS[0];
   const duration = params.durationMinutes && [60, 90, 120].includes(params.durationMinutes)
     ? params.durationMinutes
